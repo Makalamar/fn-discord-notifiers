@@ -198,7 +198,12 @@ def main():
     print(f"Last seen commit: {last_sha or 'None (first run)'}")
 
     try:
-        commits = get_recent_commits(since_sha=last_sha, limit=30)
+        # On first run, only process the most recent commit to avoid flooding with old huge updates
+        if last_sha is None:
+            print("First run detected → only processing the latest commit")
+            commits = get_recent_commits(since_sha=None, limit=1)
+        else:
+            commits = get_recent_commits(since_sha=last_sha, limit=20)
     except Exception as e:
         print(f"[ERROR] Failed to fetch commits: {e}")
         return
