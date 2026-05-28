@@ -231,6 +231,10 @@ def main():
     print(f"Repo: {GITHUB_REPO}")
     print(f"DRY_RUN={DRY_RUN}")
 
+    # Detect if this run was triggered by schedule or manually
+    run_mode = os.environ.get("GITHUB_EVENT_NAME", "unknown")
+    print(f"Trigger: {run_mode}")
+
     state = load_state()
     last_sha = state.get("last_commit_sha")
 
