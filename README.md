@@ -1,4 +1,6 @@
-# Fortnite – Historique complet des mises à jour (patches) par Chapitre/Saison  
+# Fortnite – Historique complet des mises à jour (patches) par Chapitre/Saison
+
+> **New**: Automatic Discord notifications for every official update via GitHub Actions + Webhook (see section below).
 
 Ce dépôt fournit un suivi chronologique **du Chapitre 1 → Chapitre 6**, trié par chapitre puis par saison, avec **toutes les versions de patch** et **leurs dates de déploiement** (lorsqu’elles sont connues publiquement).  
 Les sources primaires sont les pages « Patch Notes » / « Saison » du **Fortnite Wiki (Fandom)** et, lorsqu’elles existent, les notes officielles d’Epic Games.  
@@ -39,4 +41,69 @@ Le script :
 5. régénère les pages `chapters/*.md` et `seasons/*.md`.  
 
 ## Licence  
-MIT – voir `LICENSE`. 
+MIT – voir `LICENSE`.
+
+---
+
+## Discord Patch Notifier (Automatic)
+
+This repository includes an automatic notifier that posts **every official Fortnite update** (Updates + Content Updates) to a Discord channel via webhook.
+
+### Features
+- Posts **all** patches (including small hotfixes)
+- English only (as requested)
+- Clean embed with direct link to the season's patch notes on the Fortnite Wiki
+- Runs automatically every 20 minutes via GitHub Actions
+- State is persisted in the repo (`data/last_notified.json`) so it never spams old patches
+
+### Setup (one-time)
+
+1. **Create a Discord webhook**
+   - Go to your server → Channel settings → Integrations → Webhooks → New Webhook
+   - Give it a name (e.g. "Fortnite Updates") and copy the webhook URL
+
+2. **Add the secret to your GitHub repository**
+   - Go to your repo → **Settings** → **Secrets and variables** → **Actions**
+   - Click **New repository secret**
+   - Name: `DISCORD_WEBHOOK_URL`
+   - Value: paste the full webhook URL you copied
+
+3. **Enable the workflow**
+   - Go to the **Actions** tab
+   - You should see "Fortnite Patch Notifier"
+   - Run it manually once using **Run workflow** (this will post the latest known patch and bootstrap the state)
+
+After that, it will automatically check for new patches every 20 minutes and post them.
+
+### Manual testing (locally)
+
+```bash
+# Dry run (prints what would be sent, no Discord call)
+DRY_RUN=1 python scripts/fortnite_discord_notifier.py
+
+# Real run (requires the env var)
+DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..." \
+python scripts/fortnite_discord_notifier.py
+```
+
+### How it works
+- Uses the reliable public API `https://fortnite-api.com/v2/news` (Battle Royale section)
+- Filters for items that look like real updates/events
+- Posts rich Discord embeds (title + body + official image when available)
+- Links to the official https://www.fortnite.com/news hub for full patch notes
+- Tracks already-posted items via `data/last_notified.json` and commits the state back
+- Never relies on fragile web scraping (Fandom blocks most bots)
+
+### Customizing
+- Want fewer notifications? Edit the schedule in `.github/workflows/fortnite-patch-notifier.yml`
+- Want to change the embed style? Edit `scripts/fortnite_discord_notifier.py`
+- New season launched? Add the new season URL to `SEASON_PAGES` in the notifier script
+
+---
+
+## Génération / mise à jour manuelle de l'historique
+
+```bash
+python3 scripts/scrape_patches.py
+```
+
