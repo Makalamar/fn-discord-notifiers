@@ -99,19 +99,20 @@ def clean_filename(full_path: str) -> str:
 
 
 def build_title(commit: Dict, filename: str) -> str:
-    """Build the exact style of title the user wants."""
+    """Build title in the style the user wants (matching NiteStats examples)."""
     short_sha = commit["sha"][:7]
     clean = clean_filename(filename)
-    # Try to extract version from commit message (e.g. "v40.40 inis")
+
     msg = commit.get("commit", {}).get("message", "")
     version = ""
     if msg.lower().startswith("v"):
-        # Take first word like "v40.40"
         version = msg.split()[0]
-    if version:
-        return f"**{version}_{clean}** a été mis à jour !"
-    else:
-        return f"**{short_sha}_{clean}** a été mis à jour !"
+
+    # Use the version if available, otherwise fall back to short sha
+    ver_part = version if version else short_sha
+
+    # Default to English "was updated!" to match most of the examples provided
+    return f"**Ver-{ver_part}_{clean}** was updated!"
 
 
 def extract_diff_for_file(commit_details: Dict, filename: str) -> Optional[str]:
@@ -125,11 +126,19 @@ def extract_diff_for_file(commit_details: Dict, filename: str) -> Optional[str]:
     return None
 
 
-def send_discord_message(title: str, diff: str) -> bool:
-    """Send a message using the exact format requested by the user."""
+def send_discord_message(title: str, diff: str, notes: str = "") -> bool:
+    """
+    Send a message in a style close to NiteStats examples.
+    - Title like: **Ver-XXXX_Filename** was updated!
+    - Clean diff block
+    - Optional **__Explications__** section (like in the user's examples)
+    """
     content = f"{title}\n```diff\n{diff}\n```"
 
-    if len(content) > 1990:  # Discord hard limit
+    if notes:
+        content += f"\n**__Explications__**\n{notes}"
+
+    if len(content) > 1990:
         content = content[:1980] + "\n...```"
 
     payload = {"content": content}
@@ -166,11 +175,14 @@ def process_commit(commit: Dict) -> int:
 
     # Safety: too many files → post summary instead of spam
     if len(changed_files) > MAX_FILES_PER_COMMIT:
-        title = f"**{sha[:7]}** — Gros commit avec {len(changed_files)} fichiers .ini"
-        summary = f"Commit: https://github.com/{GITHUB_REPO}/commit/{sha}\n" \
-                  f"Message: {details['commit']['message']}\n\n" \
-                  f"Trop de fichiers pour tout lister ici. Va voir le commit."
-        send_discord_message(title, summary)
+        title = f"**Ver-{sha[:7]}** — Important update ({len(changed_files)} .ini files changed)"
+        summary = (
+            f"**Commit:** https://github.com/{GITHUB_REPO}/commit/{sha}\n"
+            f"**Message:** {details['commit']['message']}\n\n"
+            f"Too many files changed for individual diffs.\n"
+            f"Check the commit above for full details."
+        )
+        send_discord_message(title, summary, notes="")
         return 1
 
     sent = 0
@@ -182,7 +194,7 @@ def process_commit(commit: Dict) -> int:
             diff = f"(Pas de diff détaillé disponible)\nVoir: https://github.com/{GITHUB_REPO}/commit/{sha}"
 
         title = build_title(commit, filename)
-        if send_discord_message(title, diff):
+        if send_discord_message(title, diff, notes=""):
             sent += 1
             time.sleep(SLEEP_BETWEEN_MESSAGES)
 
