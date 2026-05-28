@@ -34,6 +34,9 @@ MAX_FILES_PER_COMMIT = 25          # If more than this, post summary instead of 
 MAX_DIFF_LENGTH = 1800             # Discord message limit safety
 SLEEP_BETWEEN_MESSAGES = 1.2       # Seconds between Discord messages (rate limit)
 
+force_val = os.environ.get("FORCE_LATEST", "0").lower()
+FORCE_LATEST = force_val in ("1", "true", "yes")
+
 HEADERS = {
     "Accept": "application/vnd.github.v3+json",
     "User-Agent": "fortnite-ini-hotfix-notifier/1.0",
@@ -196,10 +199,13 @@ def main():
     last_sha = state.get("last_commit_sha")
 
     print(f"Last seen commit: {last_sha or 'None (first run)'}")
+    print(f"FORCE_LATEST={FORCE_LATEST}")
 
     try:
-        # On first run, only process the most recent commit to avoid flooding with old huge updates
-        if last_sha is None:
+        if FORCE_LATEST:
+            print("FORCE_LATEST enabled → will process the latest commit even if already seen")
+            commits = get_recent_commits(since_sha=None, limit=1)
+        elif last_sha is None:
             print("First run detected → only processing the latest commit")
             commits = get_recent_commits(since_sha=None, limit=1)
         else:

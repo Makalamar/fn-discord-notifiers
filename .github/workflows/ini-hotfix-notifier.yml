@@ -5,6 +5,12 @@ on:
     # Check every 5 minutes for new .ini hotfixes (fastest possible on free GitHub)
     - cron: "*/5 * * * *"
   workflow_dispatch:
+    inputs:
+      force_latest:
+        description: "Force notification of the most recent commit (even if already processed)"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   notify:
@@ -30,6 +36,7 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE_LATEST: ${{ github.event.inputs.force_latest || 'false' }}
         run: python scripts/ini_hotfix_notifier.py
 
       - name: Commit state if new commits were processed
