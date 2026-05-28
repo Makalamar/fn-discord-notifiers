@@ -30,7 +30,7 @@ WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 DRY_RUN = os.environ.get("DRY_RUN", "0") == "1" or not WEBHOOK_URL
 
 # Safety limits
-MAX_FILES_PER_COMMIT = 25          # If more than this, post summary instead of spamming
+MAX_FILES_PER_COMMIT = 60          # If more than this, we post a summary + as many individual diffs as reasonable
 MAX_DIFF_LENGTH = 1800             # Discord message limit safety
 SLEEP_BETWEEN_MESSAGES = 1.2       # Seconds between Discord messages (rate limit)
 
@@ -180,18 +180,33 @@ def process_commit(commit: Dict) -> int:
 
     print(f"  → {len(changed_files)} .ini file(s) changed")
 
-    # Safety: too many files → post summary instead of spam
+    # If too many files changed, post a summary header + as many individual diffs as reasonable
     if len(changed_files) > MAX_FILES_PER_COMMIT:
-        title = f"**Ver-{sha[:7]}** — Important update ({len(changed_files)} .ini files changed)"
+        title = f"**Ver-{sha[:7]}** — Gros hotfix ({len(changed_files)} fichiers .ini modifiés)"
         summary = (
             f"**Commit:** https://github.com/{GITHUB_REPO}/commit/{sha}\n"
             f"**Message:** {details['commit']['message']}\n\n"
-            f"Too many files changed for individual diffs.\n"
-            f"Check the commit above for full details."
+            f"Trop de fichiers pour tout poster. Voici les premiers :\n"
+            f"Voir le commit complet pour la liste exhaustive."
         )
         notes_to_use = MANUAL_NOTES if MANUAL_NOTES else ""
         send_discord_message(title, summary, notes=notes_to_use)
-        return 1
+
+        # Still post individual diffs for the first N files
+        sent = 1
+        for f in changed_files[:45]:  # post up to 45 individual diffs even on big commits
+            filename = f["filename"]
+            diff = extract_diff_for_file(details, filename)
+            if not diff:
+                diff = f"(Pas de diff détaillé disponible)\nVoir: https://github.com/{GITHUB_REPO}/commit/{sha}"
+
+            title = build_title(commit, filename)
+            notes_to_use = MANUAL_NOTES if MANUAL_NOTES else ""
+            if send_discord_message(title, diff, notes=notes_to_use):
+                sent += 1
+                time.sleep(SLEEP_BETWEEN_MESSAGES)
+
+        return sent
 
     sent = 0
     for f in changed_files:
