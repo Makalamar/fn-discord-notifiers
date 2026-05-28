@@ -37,6 +37,13 @@ SLEEP_BETWEEN_MESSAGES = 1.2       # Seconds between Discord messages (rate limi
 force_val = os.environ.get("FORCE_LATEST", "0").lower()
 FORCE_LATEST = force_val in ("1", "true", "yes")
 
+# Manual explanations / notes that the user can provide when triggering manually
+MANUAL_NOTES = (
+    os.environ.get("NOTES", "")
+    or os.environ.get("EXPLANATIONS", "")
+    or os.environ.get("MANUAL_NOTES", "")
+)
+
 HEADERS = {
     "Accept": "application/vnd.github.v3+json",
     "User-Agent": "fortnite-ini-hotfix-notifier/1.0",
@@ -182,7 +189,8 @@ def process_commit(commit: Dict) -> int:
             f"Too many files changed for individual diffs.\n"
             f"Check the commit above for full details."
         )
-        send_discord_message(title, summary)
+        notes_to_use = MANUAL_NOTES if MANUAL_NOTES else ""
+        send_discord_message(title, summary, notes=notes_to_use)
         return 1
 
     sent = 0
@@ -194,7 +202,8 @@ def process_commit(commit: Dict) -> int:
             diff = f"(Pas de diff détaillé disponible)\nVoir: https://github.com/{GITHUB_REPO}/commit/{sha}"
 
         title = build_title(commit, filename)
-        if send_discord_message(title, diff):
+        notes_to_use = MANUAL_NOTES if MANUAL_NOTES else ""
+        if send_discord_message(title, diff, notes=notes_to_use):
             sent += 1
             time.sleep(SLEEP_BETWEEN_MESSAGES)
 

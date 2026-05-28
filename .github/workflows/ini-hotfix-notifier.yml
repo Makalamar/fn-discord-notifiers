@@ -11,6 +11,11 @@ on:
         required: false
         default: false
         type: boolean
+      notes:
+        description: "Explications / Notes à ajouter manuellement (optionnel)"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   notify:
@@ -40,6 +45,7 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FORCE_LATEST: ${{ github.event.inputs.force_latest || 'false' }}
+          NOTES: ${{ github.event.inputs.notes || '' }}
         run: python scripts/ini_hotfix_notifier.py
 
       - name: Commit state if new commits were processed
