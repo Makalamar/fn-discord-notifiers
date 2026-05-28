@@ -37,6 +37,10 @@ def get_access_token(refresh_token: str) -> Optional[str]:
         print("[ERROR] EPIC_REFRESH_TOKEN manquant")
         return None
 
+    # Try refreshing with the PC launcher client (often has better CloudStorage permissions)
+    LAUNCHER_CLIENT_ID = "ec684b8c687f479fadea3cb2ad83f5c6"
+    LAUNCHER_CLIENT_SECRET = "e1f31c211f28413186262d37a13fc84d"
+
     try:
         r = requests.post(
             "https://account-public-service-prod.ol.epicgames.com/account/api/oauth/token",
@@ -45,13 +49,13 @@ def get_access_token(refresh_token: str) -> Optional[str]:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
             },
-            auth=("34a02cf8f4414e29b15921876da36f9a", "daafbccc737745039dffe53d94fc76cf"),
+            auth=(LAUNCHER_CLIENT_ID, LAUNCHER_CLIENT_SECRET),
             timeout=30
         )
         r.raise_for_status()
         return r.json()["access_token"]
     except Exception as e:
-        print(f"[ERROR] Impossible de rafraîchir le token: {e}")
+        print(f"[ERROR] Impossible de rafraîchir le token avec launcher client: {e}")
         return None
 
 # ==================== CLOUDSTORAGE ====================
