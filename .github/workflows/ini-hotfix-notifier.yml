@@ -44,24 +44,23 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FORCE_LATEST: ${{ github.event.inputs.force_latest || 'false' }}
           NOTES: ${{ github.event.inputs.notes || '' }}
-          EPIC_BEARER_TOKEN: ${{ secrets.EPIC_BEARER_TOKEN }}
+          EPIC_REFRESH_TOKEN: ${{ secrets.EPIC_REFRESH_TOKEN }}
         run: python scripts/ini_hotfix_notifier.py
 
-      - name: Commit state if new commits were processed
+      - name: Commit updated .ini files if any changes were detected
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Re-authenticate the remote for push (required when persist-credentials: false)
+          # Re-authenticate for push
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
 
-          if git diff --quiet data/last_ini_commit.json; then
-            echo "No state changes."
+          if git diff --quiet last_cloudstorage/; then
+            echo "No new .ini changes to commit."
           else
-            git add data/last_ini_commit.json
-            git commit -m "chore: update last seen INI commit [skip ci]"
+            git add last_cloudstorage/
+            git commit -m "chore: update last known CloudStorage .ini files [skip ci]"
             git push
-            echo "State committed."
+            echo "Updated .ini files committed."
           fi
