@@ -57,22 +57,44 @@ def get_access_token(refresh_token: str) -> Optional[str]:
 # ==================== CLOUDSTORAGE ====================
 
 def fetch_cloudstorage_file(filename: str, access_token: str) -> Optional[str]:
-    url = f"{CLOUDSTORAGE_BASE}/{filename}"
     headers = {
         "Authorization": f"bearer {access_token}",
         "User-Agent": "Fortnite/++Fortnite+Release-34.00-CL-00000000 Windows/10.0.19045.1",
     }
+
+    # First, get the list of system files to find the correct uniqueFilename
     try:
-        resp = requests.get(url, headers=headers, timeout=30)
+        list_resp = requests.get(CLOUDSTORAGE_BASE, headers=headers, timeout=30)
+        if list_resp.status_code != 200:
+            print(f"[CLOUDSTORAGE] Impossible de lister les fichiers système: {list_resp.status_code}")
+            return None
+
+        files_list = list_resp.json()
+        target_file = next((f for f in files_list if f.get("filename") == filename), None)
+
+        if not target_file:
+            print(f"[CLOUDSTORAGE] {filename} non trouvé dans la liste système")
+            return None
+
+        unique_filename = target_file.get("uniqueFilename")
+        if not unique_filename:
+            print(f"[CLOUDSTORAGE] Pas de uniqueFilename pour {filename}")
+            return None
+
+        # Download using the uniqueFilename (more reliable)
+        download_url = f"{CLOUDSTORAGE_BASE}/{unique_filename}"
+        resp = requests.get(download_url, headers=headers, timeout=30)
+
         if resp.status_code == 200:
             return resp.text
         elif resp.status_code == 404:
             return None
         else:
-            print(f"[CLOUDSTORAGE] Erreur {filename}: {resp.status_code}")
+            print(f"[CLOUDSTORAGE] Erreur téléchargement {filename} ({unique_filename}): {resp.status_code}")
             return None
+
     except Exception as e:
-        print(f"[CLOUDSTORAGE] Exception {filename}: {e}")
+        print(f"[CLOUDSTORAGE] Exception lors du fetch de {filename}: {e}")
         return None
 
 def get_changes(access_token: str) -> List[Dict[str, str]]:
