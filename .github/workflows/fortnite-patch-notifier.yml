@@ -39,6 +39,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          # Re-authenticate the remote for push (required when persist-credentials: false)
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
           if git diff --quiet data/last_notified.json; then
             echo "No state changes to commit."
           else
