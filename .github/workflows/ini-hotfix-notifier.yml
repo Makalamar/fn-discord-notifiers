@@ -46,6 +46,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FORCE_LATEST: ${{ github.event.inputs.force_latest || 'false' }}
           NOTES: ${{ github.event.inputs.notes || '' }}
+          EPIC_BEARER_TOKEN: ${{ secrets.EPIC_BEARER_TOKEN }}
         run: python scripts/ini_hotfix_notifier.py
 
       - name: Commit state if new commits were processed

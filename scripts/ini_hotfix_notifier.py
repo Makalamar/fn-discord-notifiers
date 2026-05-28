@@ -2,19 +2,19 @@
 # -*- coding: utf-8 -*-
 """
 Fortnite INI Hotfix Notifier
-- Watches iFireMonkey/FortniteTracker for new commits touching .ini files
-- Posts to Discord in the exact format requested:
-    **Ver-XXXX_Filename.ini** a été mis à jour !
-    ```diff
-    ...
-    ```
-- Runs every 5 minutes via GitHub Actions for fastest possible notifications
+
+Two modes supported:
+1. GitHub watcher (iFireMonkey/FortniteTracker) - legacy/slower
+2. Direct Epic CloudStorage polling - faster and more accurate for real hotfixes
+
+The script now prioritizes direct CloudStorage when credentials are provided.
 """
 
 import os
 import sys
 import json
 import time
+import difflib
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
@@ -51,6 +51,27 @@ HEADERS = {
 
 if "GITHUB_TOKEN" in os.environ:
     HEADERS["Authorization"] = f"token {os.environ['GITHUB_TOKEN']}"
+
+# ====================== CLOUDSTORAGE (Epic direct) ======================
+CLOUDSTORAGE_BASE = "https://fngw-mcp-gc-livefn.ol.epicgames.com/fortnite/api/cloudstorage/system"
+EPIC_BEARER_TOKEN = os.environ.get("EPIC_BEARER_TOKEN", "").strip()
+
+CLOUDSTORAGE_HEADERS = {
+    "User-Agent": "Fortnite/++Fortnite+Release-34.00-CL-00000000 Windows/10.0.19045.1",
+}
+if EPIC_BEARER_TOKEN:
+    CLOUDSTORAGE_HEADERS["Authorization"] = f"bearer {EPIC_BEARER_TOKEN}"
+
+# Files we want to monitor for hotfixes (add/remove as needed)
+MONITORED_CLOUDSTORAGE_FILES = [
+    "DefaultEngine.ini",
+    "DefaultGame.ini",
+    "DefaultRuntimeOptions.ini",
+    "DefaultJunoExclusiveGame.ini",
+    "Switch_Engine.ini",
+    "Switch_Game.ini",
+    # Add more if needed (e.g. Android_Engine.ini, etc.)
+]
 
 
 def load_state() -> Dict[str, Any]:
@@ -225,15 +246,119 @@ def process_commit(commit: Dict) -> int:
     return sent
 
 
+# ====================== CLOUDSTORAGE HELPERS ======================
+
+def fetch_cloudstorage_file(filename: str) -> Optional[str]:
+    """Download a specific system .ini file from Epic CloudStorage."""
+    if not EPIC_BEARER_TOKEN:
+        print(f"[CLOUDSTORAGE] No EPIC_BEARER_TOKEN provided, skipping {filename}")
+        return None
+
+    url = f"{CLOUDSTORAGE_BASE}/{filename}"
+    try:
+        resp = requests.get(url, headers=CLOUDSTORAGE_HEADERS, timeout=30)
+        if resp.status_code == 200:
+            return resp.text
+        elif resp.status_code == 404:
+            print(f"[CLOUDSTORAGE] {filename} not found (404)")
+            return None
+        else:
+            print(f"[CLOUDSTORAGE] Failed to fetch {filename}: {resp.status_code} - {resp.text[:200]}")
+            return None
+    except Exception as e:
+        print(f"[CLOUDSTORAGE] Error fetching {filename}: {e}")
+        return None
+
+
+def get_cloudstorage_changes() -> List[Dict[str, str]]:
+    """
+    Check monitored files against last known versions stored in the repo.
+    Returns list of changed files with old/new content for diffing.
+    """
+    changes = []
+    last_known_dir = "last_cloudstorage"
+
+    os.makedirs(last_known_dir, exist_ok=True)
+
+    for filename in MONITORED_CLOUDSTORAGE_FILES:
+        current = fetch_cloudstorage_file(filename)
+        if current is None:
+            continue
+
+        last_path = os.path.join(last_known_dir, filename)
+
+        old_content = ""
+        if os.path.exists(last_path):
+            with open(last_path, "r", encoding="utf-8", errors="ignore") as f:
+                old_content = f.read()
+
+        if current != old_content:
+            print(f"[CLOUDSTORAGE] Change detected in {filename}")
+            changes.append({
+                "filename": filename,
+                "old": old_content,
+                "new": current
+            })
+
+            # Save new version
+            with open(last_path, "w", encoding="utf-8") as f:
+                f.write(current)
+
+    return changes
+
+
+def generate_diff(old: str, new: str, filename: str) -> str:
+    """Generate a unified diff."""
+    diff = difflib.unified_diff(
+        old.splitlines(keepends=True),
+        new.splitlines(keepends=True),
+        fromfile=f"a/{filename}",
+        tofile=f"b/{filename}",
+        n=3
+    )
+    result = "".join(diff)
+    if not result.strip():
+        return "(No textual diff - binary or whitespace only change)"
+    return result[:1800]  # safety
+
+
+# ====================== MAIN ======================
+
 def main():
     print(f"=== Fortnite INI Hotfix Notifier ===")
     print(f"Time: {datetime.now(timezone.utc).isoformat()}")
-    print(f"Repo: {GITHUB_REPO}")
     print(f"DRY_RUN={DRY_RUN}")
 
-    # Detect if this run was triggered by schedule or manually
     run_mode = os.environ.get("GITHUB_EVENT_NAME", "unknown")
     print(f"Trigger: {run_mode}")
+
+    # ==================== CLOUDSTORAGE MODE (preferred) ====================
+    if EPIC_BEARER_TOKEN:
+        print("[MODE] Using direct Epic CloudStorage (fastest)")
+        changes = get_cloudstorage_changes()
+
+        if not changes:
+            print("No CloudStorage changes detected since last run.")
+            return
+
+        print(f"Found {len(changes)} changed file(s) in CloudStorage.")
+
+        for change in changes:
+            filename = change["filename"]
+            diff = generate_diff(change["old"], change["new"], filename)
+
+            title = f"**{filename}** was updated!"
+
+            notes = MANUAL_NOTES if MANUAL_NOTES else ""
+            send_discord_message(title, diff, notes=notes)
+            time.sleep(1.5)
+
+        print("Done (CloudStorage mode).")
+        return
+
+    # ==================== FALLBACK: GitHub watcher (iFireMonkey) ====================
+    print("[MODE] No EPIC_BEARER_TOKEN found → falling back to GitHub watcher (iFireMonkey)")
+    print(f"Repo: {GITHUB_REPO}")
 
     state = load_state()
     last_sha = state.get("last_commit_sha")
