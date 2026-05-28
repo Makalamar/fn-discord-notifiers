@@ -99,7 +99,7 @@ def clean_filename(full_path: str) -> str:
 
 
 def build_title(commit: Dict, filename: str) -> str:
-    """Build title in the style the user wants (matching NiteStats examples)."""
+    """Build title in French, matching the user's preference."""
     short_sha = commit["sha"][:7]
     clean = clean_filename(filename)
 
@@ -108,11 +108,8 @@ def build_title(commit: Dict, filename: str) -> str:
     if msg.lower().startswith("v"):
         version = msg.split()[0]
 
-    # Use the version if available, otherwise fall back to short sha
     ver_part = version if version else short_sha
-
-    # Default to English "was updated!" to match most of the examples provided
-    return f"**Ver-{ver_part}_{clean}** was updated!"
+    return f"**Ver-{ver_part}_{clean}** a été mis à jour !"
 
 
 def extract_diff_for_file(commit_details: Dict, filename: str) -> Optional[str]:
@@ -128,15 +125,18 @@ def extract_diff_for_file(commit_details: Dict, filename: str) -> Optional[str]:
 
 def send_discord_message(title: str, diff: str, notes: str = "") -> bool:
     """
-    Send a message in a style close to NiteStats examples.
-    - Title like: **Ver-XXXX_Filename** was updated!
-    - Clean diff block
-    - Optional **__Explications__** section (like in the user's examples)
+    Send message in the style requested by the user (French + NiteStats-like).
+    Always includes an **__Explications__** section so the user can easily edit
+    the Discord message afterward to add manual explanations.
     """
     content = f"{title}\n```diff\n{diff}\n```"
 
+    # Always add the Explications section (empty if no notes)
+    # This makes it very easy for the user to edit the message later and fill it
     if notes:
         content += f"\n**__Explications__**\n{notes}"
+    else:
+        content += "\n**__Explications__**"
 
     if len(content) > 1990:
         content = content[:1980] + "\n...```"
@@ -182,7 +182,7 @@ def process_commit(commit: Dict) -> int:
             f"Too many files changed for individual diffs.\n"
             f"Check the commit above for full details."
         )
-        send_discord_message(title, summary, notes="")
+        send_discord_message(title, summary)
         return 1
 
     sent = 0
@@ -194,7 +194,7 @@ def process_commit(commit: Dict) -> int:
             diff = f"(Pas de diff détaillé disponible)\nVoir: https://github.com/{GITHUB_REPO}/commit/{sha}"
 
         title = build_title(commit, filename)
-        if send_discord_message(title, diff, notes=""):
+        if send_discord_message(title, diff):
             sent += 1
             time.sleep(SLEEP_BETWEEN_MESSAGES)
 
