@@ -1,6 +1,41 @@
+# Fortnite INI Hotfix Tracker (Discord Notifications)
+
+**Objectif principal** : Être notifié **le plus rapidement possible** quand Epic pousse des hotfixes .ini (tous les fichiers de configuration).
+
+- Vérifie toutes les **5 minutes**
+- Surveille principalement **iFireMonkey/FortniteTracker**
+- Poste dans Discord avec le format exact que tu veux :
+  ```
+  **Ver-XXXX_Fichier.ini** a été mis à jour !
+  ```diff
+  ...
+  ```
+
+---
+
+## Configuration rapide (INI Hotfix Notifier)
+
+1. Assure-toi que le secret `DISCORD_WEBHOOK_URL` existe déjà dans :
+   `Settings → Secrets and variables → Actions`
+
+2. Le workflow tourne automatiquement toutes les 5 minutes.
+
+3. Pour forcer une première exécution :
+   - Va dans l’onglet **Actions**
+   - Sélectionne **"Fortnite INI Hotfix Notifier"**
+   - Clique sur **Run workflow**
+
+---
+
+## Ancien système (News)
+
+L’ancien notifier d’annonces officielles (`fortnite_discord_notifier.py`) est toujours présent mais n’est plus la priorité. Tu peux le désactiver ou le supprimer si tu veux.
+
+---
+
 # Fortnite – Historique complet des mises à jour (patches) par Chapitre/Saison
 
-> **New**: Automatic Discord notifications for every official update via GitHub Actions + Webhook (see section below).
+> Ancien système de suivi historique des patches. Le nouveau tracker INI (ci-dessus) est maintenant la partie active.
 
 Ce dépôt fournit un suivi chronologique **du Chapitre 1 → Chapitre 6**, trié par chapitre puis par saison, avec **toutes les versions de patch** et **leurs dates de déploiement** (lorsqu’elles sont connues publiquement).  
 Les sources primaires sont les pages « Patch Notes » / « Saison » du **Fortnite Wiki (Fandom)** et, lorsqu’elles existent, les notes officielles d’Epic Games.  
