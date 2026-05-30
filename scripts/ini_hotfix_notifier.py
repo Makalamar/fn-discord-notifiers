@@ -18,6 +18,10 @@ DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 DRY_RUN = os.environ.get("DRY_RUN", "0") == "1" or not DISCORD_WEBHOOK_URL
 NOTES = os.environ.get("NOTES", "").strip()
 
+# Version number used in the Discord title (update this when a new major patch drops)
+# Format wanted by user: Ver-YYYYMMDD-XXXX_filename
+FORTNITE_VERSION = os.environ.get("FORTNITE_VERSION", "4041").strip()
+
 # Dilly public mirror (no auth required)
 DILLY_LIST_URL = "https://export-service-new.dillyapis.com/v1/cloudstorage"
 LAST_KNOWN_DIR = "last_cloudstorage"
@@ -128,17 +132,23 @@ def generate_diff(old: str, new: str, file_name: str) -> str:
 
 # ==================== DISCORD MESSAGE (exact user format) ====================
 
+def build_versioned_title(file_name: str) -> str:
+    """Builds the exact title format requested: Ver-YYYYMMDD-XXXX_filename"""
+    date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+    version = FORTNITE_VERSION or "4041"
+    return f"**Ver-{date_str}-{version}_{file_name} a été mis à jour !**"
+
+
 def build_discord_content(file_name: str, diff_text: str, notes: str = "") -> str:
     """
-    Exact format requested by user:
-    **<filename> a été mis à jour !**
+    Exact format requested:
+    **Ver-20260530-4041_DefaultGame.ini a été mis à jour !**
     ```diff
     ...
     ```
     **__Explications__**
-    (empty or pre-filled via workflow input)
     """
-    title = f"**{file_name} a été mis à jour !**"
+    title = build_versioned_title(file_name)
     content = f"{title}\n```diff\n{diff_text}\n```"
 
     if notes:

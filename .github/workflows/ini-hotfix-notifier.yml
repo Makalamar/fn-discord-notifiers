@@ -11,6 +11,11 @@ on:
         required: false
         default: false
         type: boolean
+      fortnite_version:
+        description: "Numéro de version du jeu (ex: 4041). Laisser vide pour utiliser la valeur par défaut du script."
+        required: false
+        type: string
+        default: ""
       notes:
         description: "Explications / Notes à ajouter manuellement (optionnel, visible dans le message Discord)"
         required: false
@@ -45,6 +50,7 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           NOTES: ${{ github.event.inputs.notes || '' }}
           DRY_RUN: ${{ github.event.inputs.dry_run && '1' || '0' }}
+          FORTNITE_VERSION: ${{ github.event.inputs.fortnite_version || '' }}
         run: python scripts/ini_hotfix_notifier.py
 
       - name: Commit updated .ini state (last_cloudstorage/)

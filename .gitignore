@@ -1,0 +1,21 @@
+# Runtime state for the INI hotfix notifier
+# These files are populated automatically by the GitHub Action
+last_cloudstorage/*.ini
+last_cloudstorage/*.json
+!last_cloudstorage/.gitkeep
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local test / development files
+*.log
+.env
+.venv/
+
+# Old auth experiments (keep only if you still use them)
+create_pc_device_auth.py
+exchange_code_to_token.py
+get_epic_token.py
+get_get_epic_token.py
