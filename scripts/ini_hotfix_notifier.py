@@ -1,199 +1,240 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Fortnite INI Hotfix Notifier - Direct CloudStorage Mode
+Fortnite INI Hotfix Notifier - Dilly Mirror (export-service-new.dillyapis.com)
+Public, no-auth, fast updates for all .ini CloudStorage files.
 """
 
 import os
 import json
-import time
 import difflib
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from typing import Dict, List, Optional, Any
 
 import requests
 
 # ==================== CONFIG ====================
-EPIC_REFRESH_TOKEN = os.environ.get("EPIC_REFRESH_TOKEN", "").strip()
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 DRY_RUN = os.environ.get("DRY_RUN", "0") == "1" or not DISCORD_WEBHOOK_URL
+NOTES = os.environ.get("NOTES", "").strip()
 
-# Fichiers qu'on surveille (ajoute/enlève ce dont tu as besoin)
-MONITORED_FILES = [
-    "DefaultEngine.ini",
-    "DefaultGame.ini",
-    "DefaultJunoExclusiveGame.ini",
-    "DefaultRuntimeOptions.ini",
-    "Switch_Engine.ini",
-]
-
-CLOUDSTORAGE_BASE = "https://fngw-mcp-gc-livefn.ol.epicgames.com/fortnite/api/cloudstorage/system"
+# Dilly public mirror (no auth required)
+DILLY_LIST_URL = "https://export-service-new.dillyapis.com/v1/cloudstorage"
 LAST_KNOWN_DIR = "last_cloudstorage"
 
-# ==================== TOKEN ====================
+# Timeout and limits
+REQUEST_TIMEOUT = 30
+MAX_DIFF_CHARS = 1800
 
-def get_access_token(refresh_token: str) -> Optional[str]:
-    if not refresh_token:
-        print("[ERROR] EPIC_REFRESH_TOKEN manquant")
-        return None
+# ==================== DILLY API ====================
 
-    # Try refreshing with the PC launcher client (often has better CloudStorage permissions)
-    LAUNCHER_CLIENT_ID = "ec684b8c687f479fadea3cb2ad83f5c6"
-    LAUNCHER_CLIENT_SECRET = "e1f31c211f28413186262d37a13fc84d"
-
+def fetch_dilly_list() -> List[Dict[str, Any]]:
+    """Fetch the complete list of available cloudstorage entries from Dilly mirror."""
     try:
-        r = requests.post(
-            "https://account-public-service-prod.ol.epicgames.com/account/api/oauth/token",
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
-            },
-            auth=(LAUNCHER_CLIENT_ID, LAUNCHER_CLIENT_SECRET),
-            timeout=30
-        )
-        r.raise_for_status()
-        return r.json()["access_token"]
+        resp = requests.get(DILLY_LIST_URL, timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, list):
+            print(f"[DILLY] Unexpected response type: {type(data)}")
+            return []
+        print(f"[DILLY] Received {len(data)} entries")
+        return data
     except Exception as e:
-        print(f"[ERROR] Impossible de rafraîchir le token avec launcher client: {e}")
-        return None
+        print(f"[DILLY] Failed to fetch list: {e}")
+        return []
 
-# ==================== CLOUDSTORAGE ====================
 
-def fetch_cloudstorage_file(filename: str, access_token: str) -> Optional[str]:
-    headers = {
-        "Authorization": f"bearer {access_token}",
-        "User-Agent": "Fortnite/++Fortnite+Release-34.00-CL-00000000 Windows/10.0.19045.1",
-    }
+def pick_freshest_entries(entries: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """
+    Group by fileName and keep only the most recent entry per logical file.
+    This correctly handles the ~10 duplicate filenames that exist in the source.
+    Skips entries without usable download URL.
+    """
+    freshest: Dict[str, Dict[str, Any]] = {}
 
-    # First, get the list of system files to find the correct uniqueFilename
-    try:
-        list_resp = requests.get(CLOUDSTORAGE_BASE, headers=headers, timeout=30)
-        if list_resp.status_code != 200:
-            print(f"[CLOUDSTORAGE] Impossible de lister les fichiers système: {list_resp.status_code}")
-            return None
+    for entry in entries:
+        file_name = entry.get("fileName")
+        url = entry.get("url")
+        size = entry.get("size", 0)
 
-        files_list = list_resp.json()
-        target_file = next((f for f in files_list if f.get("filename") == filename), None)
-
-        if not target_file:
-            print(f"[CLOUDSTORAGE] {filename} non trouvé dans la liste système")
-            return None
-
-        unique_filename = target_file.get("uniqueFilename")
-        if not unique_filename:
-            print(f"[CLOUDSTORAGE] Pas de uniqueFilename pour {filename}")
-            return None
-
-        # Download using the uniqueFilename (more reliable)
-        download_url = f"{CLOUDSTORAGE_BASE}/{unique_filename}"
-        resp = requests.get(download_url, headers=headers, timeout=30)
-
-        if resp.status_code == 200:
-            return resp.text
-        elif resp.status_code == 404:
-            return None
-        else:
-            print(f"[CLOUDSTORAGE] Erreur téléchargement {filename} ({unique_filename}): {resp.status_code}")
-            return None
-
-    except Exception as e:
-        print(f"[CLOUDSTORAGE] Exception lors du fetch de {filename}: {e}")
-        return None
-
-def get_changes(access_token: str) -> List[Dict[str, str]]:
-    os.makedirs(LAST_KNOWN_DIR, exist_ok=True)
-    changes = []
-
-    for filename in MONITORED_FILES:
-        current = fetch_cloudstorage_file(filename, access_token)
-        if current is None:
+        if not file_name or not url or size == 0:
             continue
 
-        last_path = os.path.join(LAST_KNOWN_DIR, filename)
-        old = ""
-        if os.path.exists(last_path):
-            with open(last_path, "r", encoding="utf-8", errors="ignore") as f:
-                old = f.read()
+        current = freshest.get(file_name)
+        if current is None:
+            freshest[file_name] = entry
+        else:
+            # Keep the one with the latest updatedAt
+            if entry.get("updatedAt", "") > current.get("updatedAt", ""):
+                freshest[file_name] = entry
 
-        if current != old:
-            print(f"[CLOUDSTORAGE] Changement détecté: {filename}")
-            changes.append({
-                "filename": filename,
-                "old": old,
-                "new": current
-            })
-            with open(last_path, "w", encoding="utf-8") as f:
-                f.write(current)
+    return freshest
 
-    return changes
 
-def generate_diff(old: str, new: str, filename: str) -> str:
-    diff = list(difflib.unified_diff(
+def download_ini(url: str) -> Optional[str]:
+    """Download raw .ini content from the stormforge CDN."""
+    try:
+        resp = requests.get(url, timeout=REQUEST_TIMEOUT)
+        if resp.status_code == 200:
+            # Force text decoding (some .ini have mixed encodings)
+            return resp.content.decode("utf-8", errors="replace")
+        print(f"[DOWNLOAD] HTTP {resp.status_code} for {url[:80]}...")
+        return None
+    except Exception as e:
+        print(f"[DOWNLOAD] Error: {e}")
+        return None
+
+# ==================== LOCAL STATE (last_cloudstorage/) ====================
+
+def get_local_content(file_name: str) -> str:
+    """Read previously seen content for this fileName (if any)."""
+    os.makedirs(LAST_KNOWN_DIR, exist_ok=True)
+    # Use the original filename (safe on all platforms for these .ini names)
+    path = os.path.join(LAST_KNOWN_DIR, file_name)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                return f.read()
+        except Exception as e:
+            print(f"[STATE] Failed to read {file_name}: {e}")
+    return ""
+
+
+def save_local_content(file_name: str, content: str) -> None:
+    """Persist the new content we just notified about."""
+    path = os.path.join(LAST_KNOWN_DIR, file_name)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+    except Exception as e:
+        print(f"[STATE] Failed to write {file_name}: {e}")
+
+# ==================== DIFF ====================
+
+def generate_diff(old: str, new: str, file_name: str) -> str:
+    diff_lines = list(difflib.unified_diff(
         old.splitlines(keepends=True),
         new.splitlines(keepends=True),
-        fromfile=f"a/{filename}",
-        tofile=f"b/{filename}",
+        fromfile=f"a/{file_name}",
+        tofile=f"b/{file_name}",
         n=3
     ))
-    result = "".join(diff)
-    return result[:1800] if result else "(Aucun diff textuel)"
+    result = "".join(diff_lines)
+    if not result.strip():
+        return "(Aucun changement textuel détecté)"
+    if len(result) > MAX_DIFF_CHARS:
+        result = result[:MAX_DIFF_CHARS] + "\n... (diff tronqué)"
+    return result
 
-# ==================== DISCORD ====================
+# ==================== DISCORD MESSAGE (exact user format) ====================
 
-def send_discord(title: str, diff: str, notes: str = ""):
-    content = f"{title}\n```diff\n{diff}\n```"
+def build_discord_content(file_name: str, diff_text: str, notes: str = "") -> str:
+    """
+    Exact format requested by user:
+    **<filename> a été mis à jour !**
+    ```diff
+    ...
+    ```
+    **__Explications__**
+    (empty or pre-filled via workflow input)
+    """
+    title = f"**{file_name} a été mis à jour !**"
+    content = f"{title}\n```diff\n{diff_text}\n```"
+
     if notes:
         content += f"\n**__Explications__**\n{notes}"
     else:
         content += "\n**__Explications__**"
 
+    # Discord hard limit ~2000 chars for webhook content
     if len(content) > 1990:
-        content = content[:1980] + "\n...```"
+        content = content[:1980] + "\n...(tronqué)```"
+    return content
+
+
+def send_discord(file_name: str, diff_text: str, notes: str = "") -> None:
+    content = build_discord_content(file_name, diff_text, notes)
 
     if DRY_RUN:
-        print("=== DRY RUN ===")
+        print("\n" + "=" * 60)
+        print("DRY RUN - Message that would be sent:")
+        print("=" * 60)
         print(content)
+        print("=" * 60 + "\n")
+        return
+
+    if not DISCORD_WEBHOOK_URL:
+        print("[ERROR] DISCORD_WEBHOOK_URL is not set")
         return
 
     try:
-        r = requests.post(DISCORD_WEBHOOK_URL, json={"content": content}, timeout=15)
-        if r.status_code not in (200, 204):
-            print(f"[ERROR] Discord webhook: {r.status_code}")
+        r = requests.post(
+            DISCORD_WEBHOOK_URL,
+            json={"content": content},
+            timeout=15
+        )
+        if r.status_code in (200, 204):
+            print(f"[DISCORD] Sent notification for {file_name}")
+        else:
+            print(f"[DISCORD] Webhook error {r.status_code}: {r.text[:200]}")
     except Exception as e:
-        print(f"[ERROR] Discord: {e}")
+        print(f"[DISCORD] Exception: {e}")
 
 # ==================== MAIN ====================
 
 def main():
-    print(f"=== Fortnite INI Hotfix Notifier (CloudStorage) ===")
+    print(f"=== Fortnite INI Hotfix Notifier (Dilly) ===")
     print(f"Time: {datetime.now(timezone.utc).isoformat()}")
+    print(f"DRY_RUN={DRY_RUN}")
 
-    if not EPIC_REFRESH_TOKEN:
-        print("[ERROR] EPIC_REFRESH_TOKEN manquant dans les secrets")
+    entries = fetch_dilly_list()
+    if not entries:
+        print("[ERROR] No entries received from Dilly. Aborting.")
         return
 
-    access_token = get_access_token(EPIC_REFRESH_TOKEN)
-    if not access_token:
-        print("[ERROR] Impossible d'obtenir un access token")
-        return
+    candidates = pick_freshest_entries(entries)
+    print(f"[INFO] {len(candidates)} unique files with usable content after filtering duplicates + stubs")
 
-    print("[INFO] Access token récupéré")
+    changes_detected = 0
 
-    changes = get_changes(access_token)
+    for file_name, entry in sorted(candidates.items()):
+        url = entry["url"]
+        updated_at = entry.get("updatedAt", "")
+        file_hash = entry.get("hash", "")[:16]
 
-    if not changes:
-        print("Aucun changement détecté dans les fichiers surveillés.")
-        return
+        old_content = get_local_content(file_name)
+        is_first_time = old_content == ""
 
-    print(f"{len(changes)} fichier(s) modifié(s)")
+        # Download new content
+        new_content = download_ini(url)
+        if new_content is None:
+            continue
 
-    for change in changes:
-        diff = generate_diff(change["old"], change["new"], change["filename"])
-        title = f"**{change['filename']}** was updated!"
-        send_discord(title, diff)
+        # First run for this file → seed state silently (do not spam Discord with 100+ messages)
+        if is_first_time:
+            save_local_content(file_name, new_content)
+            print(f"[SEED] {file_name} (first time, state initialized, no notification)")
+            continue
+
+        # Real change?
+        if new_content != old_content:
+            print(f"[CHANGE] {file_name} (hash={file_hash}, updatedAt={updated_at})")
+            diff_text = generate_diff(old_content, new_content, file_name)
+
+            send_discord(file_name, diff_text, NOTES)
+            save_local_content(file_name, new_content)
+            changes_detected += 1
+        else:
+            # Silent - no change
+            pass
+
+    if changes_detected == 0:
+        print("Aucun nouveau hotfix détecté.")
+    else:
+        print(f"{changes_detected} fichier(s) mis à jour → notifications envoyées.")
 
     print("Terminé.")
+
 
 if __name__ == "__main__":
     main()

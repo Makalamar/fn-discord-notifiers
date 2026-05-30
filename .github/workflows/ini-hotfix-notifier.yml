@@ -1,18 +1,18 @@
-name: Fortnite INI Hotfix Notifier
+name: Fortnite INI Hotfix Notifier (Dilly)
 
 on:
   schedule:
-    # Check every 5 minutes for new .ini hotfixes (fastest possible on free GitHub)
+    # Check every 5 minutes - fastest possible on GitHub free tier
     - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
-      force_latest:
-        description: "Force notification of the most recent commit (even if already processed)"
+      dry_run:
+        description: "DRY_RUN (affiche les messages sans les poster sur Discord)"
         required: false
         default: false
         type: boolean
       notes:
-        description: "Explications / Notes à ajouter manuellement (optionnel)"
+        description: "Explications / Notes à ajouter manuellement (optionnel, visible dans le message Discord)"
         required: false
         type: string
         default: ""
@@ -21,14 +21,14 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # Needed to commit & push the last_seen state file
+      contents: write   # Required to commit state changes in last_cloudstorage/
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          persist-credentials: false   # We will handle git auth ourselves for the push step
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -40,27 +40,26 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Run INI Hotfix Notifier
+      - name: Run INI Hotfix Notifier (Dilly public mirror)
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NOTES: ${{ github.event.inputs.notes || '' }}
-          EPIC_REFRESH_TOKEN: ${{ secrets.EPIC_REFRESH_TOKEN }}
+          DRY_RUN: ${{ github.event.inputs.dry_run && '1' || '0' }}
         run: python scripts/ini_hotfix_notifier.py
 
-      - name: Commit updated .ini files if any changes were detected
+      - name: Commit updated .ini state (last_cloudstorage/)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Re-authenticate for push
+          # Fix auth for push (required for github-actions[bot])
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
 
           if git diff --quiet last_cloudstorage/; then
-            echo "No new .ini changes to commit."
+            echo "No .ini state changes to commit."
           else
             git add last_cloudstorage/
-            git commit -m "chore: update last known CloudStorage .ini files [skip ci]"
+            git commit -m "chore: update last known .ini files from Dilly [skip ci]"
             git push
-            echo "Updated .ini files committed."
+            echo "State committed."
           fi
