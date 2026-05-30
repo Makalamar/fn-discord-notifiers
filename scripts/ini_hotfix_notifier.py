@@ -18,17 +18,50 @@ DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 DRY_RUN = os.environ.get("DRY_RUN", "0") == "1" or not DISCORD_WEBHOOK_URL
 NOTES = os.environ.get("NOTES", "").strip()
 
-# Version number used in the Discord title (update this when a new major patch drops)
-# Format wanted by user: Ver-YYYYMMDD-XXXX_filename
-FORTNITE_VERSION = os.environ.get("FORTNITE_VERSION", "4041").strip()
+# Manual override (via workflow input or env). If empty, we auto-detect below.
+FORTNITE_VERSION_OVERRIDE = os.environ.get("FORTNITE_VERSION", "").strip()
 
 # Dilly public mirror (no auth required)
 DILLY_LIST_URL = "https://export-service-new.dillyapis.com/v1/cloudstorage"
+AES_API_URL = "https://fortnite-api.com/v2/aes"   # Public, no key, gives current build
 LAST_KNOWN_DIR = "last_cloudstorage"
 
 # Timeout and limits
 REQUEST_TIMEOUT = 30
 MAX_DIFF_CHARS = 1800
+
+# ==================== VERSION DETECTION ====================
+
+def get_current_fortnite_version() -> str:
+    """
+    Automatically fetches the current Fortnite version from a public API.
+    Returns something like "4041" from "++Fortnite+Release-40.41-CL-..."
+    Falls back to "4041" if the API fails.
+    """
+    try:
+        resp = requests.get(AES_API_URL, timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json().get("data", {})
+        build = data.get("build", "")   # Example: "++Fortnite+Release-40.41-CL-54326946"
+
+        if "Release-" in build:
+            # Extract "40.41"
+            version_part = build.split("Release-")[1].split("-")[0]
+            # Turn "40.41" into "4041" (the format you want)
+            short_version = version_part.replace(".", "")
+            if short_version:
+                print(f"[VERSION] Auto-detected from AES API: {short_version} (full: {build})")
+                return short_version
+
+        print(f"[VERSION] Could not parse build string: {build}")
+    except Exception as e:
+        print(f"[VERSION] Failed to fetch from {AES_API_URL}: {e}")
+
+    # Fallback
+    fallback = "4041"
+    print(f"[VERSION] Using fallback version: {fallback}")
+    return fallback
+
 
 # ==================== DILLY API ====================
 
@@ -132,14 +165,14 @@ def generate_diff(old: str, new: str, file_name: str) -> str:
 
 # ==================== DISCORD MESSAGE (exact user format) ====================
 
-def build_versioned_title(file_name: str) -> str:
+def build_versioned_title(file_name: str, version: str) -> str:
     """Builds the exact title format requested: Ver-YYYYMMDD-XXXX_filename"""
     date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
-    version = FORTNITE_VERSION or "4041"
-    return f"**Ver-{date_str}-{version}_{file_name} a été mis à jour !**"
+    v = version or "4041"
+    return f"**Ver-{date_str}-{v}_{file_name} a été mis à jour !**"
 
 
-def build_discord_content(file_name: str, diff_text: str, notes: str = "") -> str:
+def build_discord_content(file_name: str, diff_text: str, version: str, notes: str = "") -> str:
     """
     Exact format requested:
     **Ver-20260530-4041_DefaultGame.ini a été mis à jour !**
@@ -148,7 +181,7 @@ def build_discord_content(file_name: str, diff_text: str, notes: str = "") -> st
     ```
     **__Explications__**
     """
-    title = build_versioned_title(file_name)
+    title = build_versioned_title(file_name, version)
     content = f"{title}\n```diff\n{diff_text}\n```"
 
     if notes:
@@ -162,8 +195,8 @@ def build_discord_content(file_name: str, diff_text: str, notes: str = "") -> st
     return content
 
 
-def send_discord(file_name: str, diff_text: str, notes: str = "") -> None:
-    content = build_discord_content(file_name, diff_text, notes)
+def send_discord(file_name: str, diff_text: str, version: str, notes: str = "") -> None:
+    content = build_discord_content(file_name, diff_text, version, notes)
 
     if DRY_RUN:
         print("\n" + "=" * 60)
@@ -196,6 +229,13 @@ def main():
     print(f"=== Fortnite INI Hotfix Notifier (Dilly) ===")
     print(f"Time: {datetime.now(timezone.utc).isoformat()}")
     print(f"DRY_RUN={DRY_RUN}")
+
+    # Determine the version number for titles (Ver-YYYYMMDD-XXXX)
+    if FORTNITE_VERSION_OVERRIDE:
+        fortnite_version = FORTNITE_VERSION_OVERRIDE
+        print(f"[VERSION] Using manual override: {fortnite_version}")
+    else:
+        fortnite_version = get_current_fortnite_version()
 
     entries = fetch_dilly_list()
     if not entries:
@@ -231,7 +271,7 @@ def main():
             print(f"[CHANGE] {file_name} (hash={file_hash}, updatedAt={updated_at})")
             diff_text = generate_diff(old_content, new_content, file_name)
 
-            send_discord(file_name, diff_text, NOTES)
+            send_discord(file_name, diff_text, fortnite_version, NOTES)
             save_local_content(file_name, new_content)
             changes_detected += 1
         else:
