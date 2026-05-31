@@ -151,7 +151,11 @@ def save_local_content(file_name: str, content: str) -> None:
 # ==================== DIFF ====================
 
 def generate_diff(old: str, new: str, file_name: str) -> str:
-    """Returns the FULL unified diff (no early truncation)."""
+    """
+    Returns a clean diff without the --- / +++ / @@ headers.
+    This makes the Discord message start directly with the actual .ini content
+    (like the style you prefer).
+    """
     diff_lines = list(difflib.unified_diff(
         old.splitlines(keepends=True),
         new.splitlines(keepends=True),
@@ -159,10 +163,18 @@ def generate_diff(old: str, new: str, file_name: str) -> str:
         tofile=f"b/{file_name}",
         n=3
     ))
-    result = "".join(diff_lines)
+
+    # Remove diff headers so the block starts directly with INI sections / changed lines
+    cleaned = []
+    for line in diff_lines:
+        if line.startswith('--- ') or line.startswith('+++ ') or line.startswith('@@ '):
+            continue
+        cleaned.append(line)
+
+    result = "".join(cleaned)
     if not result.strip():
         return "(Aucun changement textuel détecté)"
-    return result  # full diff - truncation happens later only if the whole Discord message is too long
+    return result  # full diff (truncation only at the very end if Discord limit is hit)
 
 
 # ==================== DISCORD MESSAGE (exact user format) ====================
