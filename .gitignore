@@ -1,5 +1,7 @@
 # Runtime state for the INI hotfix notifier
-# These files are populated automatically by the GitHub Action
+# These files are populated automatically by the GitHub Action.
+# They are gitignored so they don't bloat the repo history,
+# but the workflow uses `git add -f` to commit the latest versions.
 last_cloudstorage/*.ini
 last_cloudstorage/*.json
 !last_cloudstorage/.gitkeep

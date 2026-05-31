@@ -61,11 +61,15 @@ jobs:
           # Fix auth for push (required for github-actions[bot])
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
 
-          if git diff --quiet last_cloudstorage/; then
-            echo "No .ini state changes to commit."
+          # We must use -f because last_cloudstorage/*.ini are in .gitignore
+          # (we only want them in the working tree during the run, not tracked normally)
+          git add -f last_cloudstorage/
+
+          if git diff --cached --quiet; then
+            echo "No new .ini state changes to commit."
           else
-            git add last_cloudstorage/
             git commit -m "chore: update last known .ini files from Dilly [skip ci]"
             git push
-            echo "State committed."
+            echo "State committed successfully."
           fi
+
