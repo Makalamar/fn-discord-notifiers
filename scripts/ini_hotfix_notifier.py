@@ -28,7 +28,9 @@ LAST_KNOWN_DIR = "last_cloudstorage"
 
 # Timeout and limits
 REQUEST_TIMEOUT = 30
-MAX_DIFF_CHARS = 1800
+# Discord webhook content max is ~2000 chars. We try to send full diffs.
+# If a diff is extremely large, we will truncate only at the final message stage.
+DISCORD_MAX_CHARS = 1950
 
 # ==================== VERSION DETECTION ====================
 
@@ -149,6 +151,7 @@ def save_local_content(file_name: str, content: str) -> None:
 # ==================== DIFF ====================
 
 def generate_diff(old: str, new: str, file_name: str) -> str:
+    """Returns the FULL unified diff (no early truncation)."""
     diff_lines = list(difflib.unified_diff(
         old.splitlines(keepends=True),
         new.splitlines(keepends=True),
@@ -159,9 +162,8 @@ def generate_diff(old: str, new: str, file_name: str) -> str:
     result = "".join(diff_lines)
     if not result.strip():
         return "(Aucun changement textuel détecté)"
-    if len(result) > MAX_DIFF_CHARS:
-        result = result[:MAX_DIFF_CHARS] + "\n... (diff tronqué)"
-    return result
+    return result  # full diff - truncation happens later only if the whole Discord message is too long
+
 
 # ==================== DISCORD MESSAGE (exact user format) ====================
 
@@ -174,25 +176,37 @@ def build_versioned_title(file_name: str, version: str) -> str:
 
 def build_discord_content(file_name: str, diff_text: str, version: str, notes: str = "") -> str:
     """
-    Exact format requested:
-    **Ver-20260530-4041_DefaultGame.ini a été mis à jour !**
+    Produces the exact layout the user wants:
+
+    **Ver-20260531-4041_DefaultForbiddenFruitGame.ini a été mis à jour !**
     ```diff
-    ...
+    --- a/...
+    +++ b/...
+    @@ ...
     ```
     **__Explications__**
     """
     title = build_versioned_title(file_name, version)
+
+    # Build with proper code block
     content = f"{title}\n```diff\n{diff_text}\n```"
 
-    if notes:
+    if notes and notes.strip():
         content += f"\n**__Explications__**\n{notes}"
     else:
         content += "\n**__Explications__**"
 
-    # Discord hard limit ~2000 chars for webhook content
-    if len(content) > 1990:
-        content = content[:1980] + "\n...(tronqué)```"
+    # Final safety: if still too long for Discord, truncate the diff part gracefully
+    if len(content) > DISCORD_MAX_CHARS:
+        # Keep the title + opening of the code block + as much diff as possible
+        header = f"{title}\n```diff\n"
+        footer = "\n```\n**__Explications__** (diff trop long pour Discord - voir last_cloudstorage/ après mise à jour)"
+        max_diff_len = DISCORD_MAX_CHARS - len(header) - len(footer)
+        truncated_diff = diff_text[:max_diff_len].rsplit('\n', 1)[0]  # cut at line boundary
+        content = header + truncated_diff + footer
+
     return content
+
 
 
 def send_discord(file_name: str, diff_text: str, version: str, notes: str = "") -> None:
@@ -200,7 +214,7 @@ def send_discord(file_name: str, diff_text: str, version: str, notes: str = "") 
 
     if DRY_RUN:
         print("\n" + "=" * 60)
-        print("DRY RUN - Message that would be sent:")
+        print("DRY RUN - Message that would be sent to Discord:")
         print("=" * 60)
         print(content)
         print("=" * 60 + "\n")
@@ -217,9 +231,12 @@ def send_discord(file_name: str, diff_text: str, version: str, notes: str = "") 
             timeout=15
         )
         if r.status_code in (200, 204):
-            print(f"[DISCORD] Sent notification for {file_name}")
+            print(f"[DISCORD] ✅ Notification sent for {file_name}")
         else:
-            print(f"[DISCORD] Webhook error {r.status_code}: {r.text[:200]}")
+            print(f"[DISCORD] ❌ Webhook error {r.status_code}: {r.text[:300]}")
+            # If Discord rejected because too long, give hint
+            if r.status_code == 400 and "content" in r.text.lower():
+                print("[DISCORD] Hint: Le diff est probablement trop long pour Discord (limite ~2000 caractères).")
     except Exception as e:
         print(f"[DISCORD] Exception: {e}")
 
