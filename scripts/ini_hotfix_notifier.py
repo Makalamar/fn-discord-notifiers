@@ -188,15 +188,12 @@ def build_versioned_title(file_name: str, version: str) -> str:
 
 def build_discord_content(file_name: str, diff_text: str, version: str, notes: str = "") -> str:
     """
-    Produces the exact layout the user wants:
+    Produces clean messages without forced "Explications" section.
 
-    **Ver-20260531-4041_DefaultForbiddenFruitGame.ini a été mis à jour !**
-    ```diff
-    --- a/...
-    +++ b/...
-    @@ ...
-    ```
-    **__Explications__**
+    The user can provide free-form text via the workflow 'notes' input
+    (it will be appended as-is). If left empty, nothing extra is added
+    so the user can manually edit the Discord message and add their own
+    text in any format (or leave it completely empty).
     """
     title = build_versioned_title(file_name, version)
 
@@ -204,15 +201,13 @@ def build_discord_content(file_name: str, diff_text: str, version: str, notes: s
     content = f"{title}\n```diff\n{diff_text}\n```"
 
     if notes and notes.strip():
-        content += f"\n**__Explications__**\n{notes}"
-    else:
-        content += "\n**__Explications__**"
+        content += f"\n{notes}"
 
     # Final safety: if still too long for Discord, truncate the diff part gracefully
     if len(content) > DISCORD_MAX_CHARS:
         # Keep the title + opening of the code block + as much diff as possible
         header = f"{title}\n```diff\n"
-        footer = "\n```\n**__Explications__** (diff trop long pour Discord - voir last_cloudstorage/ après mise à jour)"
+        footer = "\n```\n(diff trop long pour Discord - voir last_cloudstorage/ après mise à jour)"
         max_diff_len = DISCORD_MAX_CHARS - len(header) - len(footer)
         truncated_diff = diff_text[:max_diff_len].rsplit('\n', 1)[0]  # cut at line boundary
         content = header + truncated_diff + footer
@@ -312,6 +307,7 @@ def main():
     else:
         print(f"{changes_detected} fichier(s) mis à jour → notifications envoyées.")
 
+    print(f"[HEARTBEAT] Check completed at {datetime.now(timezone.utc).isoformat()}")
     print("Terminé.")
 
 

@@ -17,7 +17,7 @@ on:
         type: string
         default: ""
       notes:
-        description: "Explications / Notes à ajouter manuellement (optionnel, visible dans le message Discord)"
+        description: "Texte libre à ajouter à la fin du message Discord (optionnel). Laisse vide = rien n'est ajouté automatiquement. Tu pourras éditer le message Discord après coup pour mettre tes explications dans le format que tu veux."
         required: false
         type: string
         default: ""
@@ -53,7 +53,13 @@ jobs:
           FORTNITE_VERSION: ${{ github.event.inputs.fortnite_version || '' }}
         run: python scripts/ini_hotfix_notifier.py
 
-      - name: Commit updated .ini state (last_cloudstorage/)
+      - name: Write heartbeat timestamp (proves the 5min run)
+        run: |
+          mkdir -p data
+          echo "Last check: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" > data/last_check.txt
+          echo "Workflow run completed successfully." >> data/last_check.txt
+
+      - name: Commit updated .ini state + heartbeat (last_cloudstorage/ + data/)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -63,13 +69,14 @@ jobs:
 
           # We must use -f because last_cloudstorage/*.ini are in .gitignore
           # (we only want them in the working tree during the run, not tracked normally)
-          git add -f last_cloudstorage/
+          git add -f last_cloudstorage/ data/last_check.txt
 
           if git diff --cached --quiet; then
-            echo "No new .ini state changes to commit."
+            echo "No changes to commit (should not happen with heartbeat)."
           else
-            git commit -m "chore: update last known .ini files from Dilly [skip ci]"
+            TIMESTAMP=$(date -u +'%Y-%m-%d %H:%M UTC')
+            git commit -m "chore: heartbeat ${TIMESTAMP} + ini state [skip ci]"
             git push
-            echo "State committed successfully."
+            echo "State + heartbeat committed successfully at ${TIMESTAMP}."
           fi
 
