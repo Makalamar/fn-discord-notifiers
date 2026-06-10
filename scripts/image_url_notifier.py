@@ -127,6 +127,7 @@ def send_discord(embed: Dict[str, Any]) -> None:
         print(f"[DISCORD] Exception: {e}")
 
 def main():
+    global DRY_RUN
     print(f"=== Fortnite Image/Video URL Notifier ===")
     print(f"Time: {datetime.now(timezone.utc).isoformat()}")
 
@@ -153,14 +154,12 @@ def main():
 
         embed = build_embed(latest_url)
 
-        if DRY_RUN:
-            print("\n" + "=" * 60)
-            print("DRY RUN - Embed that would be sent:")
-            print("=" * 60)
-            print(json.dumps({"embeds": [embed]}, indent=2, ensure_ascii=False))
-            print("=" * 60 + "\n")
-        else:
-            send_discord(embed)
+        # Force real send in TEST mode (even if DRY_RUN input was 1)
+        # so the embed is actually posted to Discord for verification.
+        original_dry = DRY_RUN
+        DRY_RUN = False
+        send_discord(embed)
+        DRY_RUN = original_dry
 
         print("[TEST] Terminé (le state 'notified' n'a pas été modifié).")
         return
