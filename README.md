@@ -50,13 +50,22 @@ This repository contains three focused GitHub Actions bots that post to Discord:
 
 ### Image/Video URL Notifier
 - Checks **every 15 minutes**
-- Extracts image and video URLs from the official Fortnite news API
+- Extracts image and video URLs from the official Fortnite news API + EGS Storefront
 - Posts clean embeds with:
   - The full URL as a clickable link
   - The image displayed large (if it's an image)
   - Video support for common formats
 - Dedicated webhook (separate channel recommended)
 - Tracks already-seen URLs in `data/notified_image_urls.json`
+- Built-in **test mode**: manually trigger to send the latest detected image/video URL for verification (forces real send when `dry_run` is unchecked)
+
+#### Manual Testing
+
+1. Go to **Actions** → "Fortnite Image/Video URL Notifier"
+2. Click **Run workflow**
+3. Options:
+   - `dry_run` → Preview the embed without posting to Discord
+   - `test_last_media` → Force send the most recent image/video URL found (perfect to verify the embed + image display with a real example)
 
 ---
 

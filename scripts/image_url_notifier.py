@@ -15,6 +15,7 @@ from typing import Set, Dict, Any, List
 # ==================== CONFIG ====================
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_IMAGE_URL_WEBHOOK_URL", "").strip()
 DRY_RUN = os.environ.get("DRY_RUN", "0") == "1" or not DISCORD_WEBHOOK_URL
+TEST_LAST_MEDIA = os.environ.get("TEST_LAST_MEDIA", "0") == "1"
 
 STATE_FILE = "data/notified_image_urls.json"
 NEWS_API_URL = "https://fortnite-api.com/v2/news"
@@ -39,9 +40,10 @@ def save_notified(urls: Set[str]) -> None:
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(sorted(list(urls)), f, indent=2)
 
-def extract_media_urls(data: Any) -> Set[str]:
-    """Recursively find all HTTP URLs that look like images or videos."""
-    urls: Set[str] = set()
+def extract_media_urls(data: Any) -> List[str]:
+    """Recursively find all HTTP URLs that look like images or videos, preserving encounter order."""
+    urls: List[str] = []
+    seen: Set[str] = set()
 
     def recurse(obj: Any):
         if isinstance(obj, dict):
@@ -54,7 +56,9 @@ def extract_media_urls(data: Any) -> Set[str]:
             if obj.startswith("http"):
                 lower = obj.lower()
                 if any(lower.endswith(ext) for ext in IMAGE_EXTS + VIDEO_EXTS):
-                    urls.add(obj)
+                    if obj not in seen:
+                        seen.add(obj)
+                        urls.append(obj)
 
     recurse(data)
     return urls
@@ -136,16 +140,42 @@ def main():
 
     all_data = {"news": news_data, "store": store_data}
     current_urls = extract_media_urls(all_data)
+
+    # ===================== TEST MODE =====================
+    if TEST_LAST_MEDIA:
+        print("[TEST] Mode activé : envoi de la dernière image/vidéo détectée (pour vérification)")
+        if not current_urls:
+            print("[TEST] Aucune URL trouvée.")
+            return
+
+        latest_url = current_urls[-1]
+        print(f"[TEST] Dernière URL : {latest_url}")
+
+        embed = build_embed(latest_url)
+
+        if DRY_RUN:
+            print("\n" + "=" * 60)
+            print("DRY RUN - Embed that would be sent:")
+            print("=" * 60)
+            print(json.dumps({"embeds": [embed]}, indent=2, ensure_ascii=False))
+            print("=" * 60 + "\n")
+        else:
+            send_discord(embed)
+
+        print("[TEST] Terminé (le state 'notified' n'a pas été modifié).")
+        return
+    # =====================================================
+
     new_urls = [u for u in current_urls if u not in notified]
 
     if not notified:
         # First run: seed without posting
-        save_notified(current_urls)
+        save_notified(set(current_urls))
         print(f"[SEED] First run - seeded {len(current_urls)} existing URLs. No notifications sent.")
         return
 
     # Keep state up to date
-    save_notified(current_urls)
+    save_notified(set(current_urls))
 
     if not new_urls:
         print("No new image/video URLs detected.")

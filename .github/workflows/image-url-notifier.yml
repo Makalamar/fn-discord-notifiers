@@ -11,6 +11,11 @@ on:
         required: false
         default: false
         type: boolean
+      test_last_media:
+        description: "TEST: envoie la DERNIÈRE image/vidéo détectée en live sur Discord (pour vérifier l'embed). Décoche 'dry_run' pour un envoi réel. Ne modifie pas le state."
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   notify:
@@ -39,6 +44,7 @@ jobs:
         env:
           DISCORD_IMAGE_URL_WEBHOOK_URL: ${{ secrets.DISCORD_IMAGE_URL_WEBHOOK_URL }}
           DRY_RUN: ${{ github.event.inputs.dry_run && '1' || '0' }}
+          TEST_LAST_MEDIA: ${{ github.event.inputs.test_last_media && '1' || '0' }}
         run: python scripts/image_url_notifier.py
 
       - name: Commit notified image/video URLs state
