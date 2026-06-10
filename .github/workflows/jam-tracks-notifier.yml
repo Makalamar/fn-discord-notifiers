@@ -15,6 +15,11 @@ on:
         required: false
         default: false
         type: boolean
+      test_last_track:
+        description: "TEST: envoie la DERNIÈRE Jam Track ajoutée (idéal pour tester l'embed + l'image thumbnail). Ne modifie pas le state."
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   notify:
@@ -44,6 +49,7 @@ jobs:
           # Use a dedicated webhook (different from the INI hotfix one)
           DISCORD_JAM_WEBHOOK_URL: ${{ secrets.DISCORD_JAM_WEBHOOK_URL }}
           DRY_RUN: ${{ github.event.inputs.dry_run && '1' || '0' }}
+          TEST_LAST_TRACK: ${{ github.event.inputs.test_last_track && '1' || '0' }}
         run: python scripts/jam_tracks_notifier.py
 
       - name: Commit notified Jam Tracks state

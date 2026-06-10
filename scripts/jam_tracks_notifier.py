@@ -15,6 +15,7 @@ from typing import List, Dict, Any, Set
 # ==================== CONFIG ====================
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_JAM_WEBHOOK_URL", "").strip()
 DRY_RUN = os.environ.get("DRY_RUN", "0") == "1" or not DISCORD_WEBHOOK_URL
+TEST_LAST_TRACK = os.environ.get("TEST_LAST_TRACK", "0") == "1"
 
 STATE_FILE = "data/notified_jam_tracks.json"
 API_URL = "https://fortnite-api.com/v2/cosmetics/tracks"
@@ -192,12 +193,34 @@ def main():
     print(f"=== Fortnite Jam Tracks Notifier ===")
     print(f"Time: {datetime.now(timezone.utc).isoformat()}")
 
-    notified = load_notified()
     tracks = fetch_tracks()
 
     if not tracks:
         print("[ERROR] No tracks received from API")
         return
+
+    # ===================== TEST MODE =====================
+    if TEST_LAST_TRACK:
+        print("[TEST] Mode activé : envoi de la dernière Jam Track ajoutée (pour vérification)")
+        # Sort by "added" date descending to get the most recent
+        sorted_tracks = sorted(
+            tracks,
+            key=lambda t: t.get("added", ""),
+            reverse=True
+        )
+        if not sorted_tracks:
+            print("[TEST] Aucune track trouvée.")
+            return
+
+        latest = sorted_tracks[0]
+        embed = build_embed(latest)
+        print(f"[TEST] Dernière track : {latest.get('title')} - {latest.get('artist')} (added: {latest.get('added')})")
+        send_discord(embed)
+        print("[TEST] Terminé (le state 'notified' n'a pas été modifié).")
+        return
+    # =====================================================
+
+    notified = load_notified()
 
     current_ids: Set[str] = set()
     new_tracks: List[Dict[str, Any]] = []
