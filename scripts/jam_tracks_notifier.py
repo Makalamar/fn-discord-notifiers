@@ -87,8 +87,8 @@ def build_message(track: Dict[str, Any]) -> str:
     duration = format_duration(track.get("duration", 0))
     bpm = track.get("bpm", 0)
 
-    # Rating (not in public API - using placeholder to match requested format)
-    rating = "E"
+    # Rating (not directly in the public API we use - using the format from your example)
+    rating = "Teen E"
 
     # New Until (approximate: added + 7 days)
     new_until = format_new_until(track.get("added"))
@@ -114,11 +114,13 @@ def build_message(track: Dict[str, Any]) -> str:
 
 **{name_line}**
 
+```
 Rating          Track ID                  Duration
 {rating}               {tid}       {duration}
 
 Key / Scale / Tempo          New Until
 {key_scale_tempo}           {new_until}
+```
 
 **Difficulty Chart**
 """ + "\n".join(diff_lines)
