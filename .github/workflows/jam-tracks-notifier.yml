@@ -16,7 +16,7 @@ on:
         default: false
         type: boolean
       test_last_track:
-        description: "TEST: envoie la DERNIÈRE Jam Track ajoutée en live sur Discord (pour vérifier l'embed + thumbnail). Décoche 'dry_run' pour un envoi réel. Ne modifie pas le state."
+        description: "TEST: force l'envoi de la DERNIÈRE Jam Track sur Discord en live (même si dry_run est coché). Idéal pour tester l'embed + l'image. Ne modifie pas le state."
         required: false
         default: false
         type: boolean

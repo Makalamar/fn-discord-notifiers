@@ -216,17 +216,14 @@ def main():
         embed = build_embed(latest)
         print(f"[TEST] Dernière track : {latest.get('title')} - {latest.get('artist')} (added: {latest.get('added')})")
 
-        if DRY_RUN:
-            # User checked dry_run + test_last_track → just preview the embed JSON
-            print("\n" + "=" * 60)
-            print("DRY RUN - Embed that would be sent:")
-            print("=" * 60)
-            print(json.dumps({"embeds": [embed]}, indent=2, ensure_ascii=False))
-            print("=" * 60 + "\n")
-        else:
-            # Real send: the TEST checkbox forces a live Discord message
-            # so you can verify the embed + thumbnail on Discord
-            send_discord(embed)
+        # Force real send when TEST_LAST_TRACK is enabled.
+        # This way, checking only the TEST box will always post a live message to Discord
+        # so you can verify the full embed + thumbnail.
+        # (The dry_run checkbox is only respected for normal runs or if you explicitly want a preview with TEST)
+        original_dry = DRY_RUN
+        DRY_RUN = False
+        send_discord(embed)
+        DRY_RUN = original_dry
 
         print("[TEST] Terminé (le state 'notified' n'a pas été modifié).")
         return
