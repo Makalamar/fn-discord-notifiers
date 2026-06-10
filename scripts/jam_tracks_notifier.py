@@ -128,8 +128,11 @@ def build_embed(track: Dict[str, Any]) -> Dict[str, Any]:
     # Key/Scale placeholder (API doesn't provide key yet)
     key_scale_tempo = f"N/A ({bpm} BPM)"
 
+    now = datetime.now().strftime("%d/%m/%Y %H:%M")
+    footer_text = f"Jam Tracks | Property of MakaStats•{now}"
+
     embed = {
-        "title": "New Track Detected",
+        "title": "🎵 New Track Detected",
         "description": f"**{name_line}**",
         "color": 0x9b59b6,  # Nice purple (Fortnite-ish)
         "thumbnail": {
@@ -168,7 +171,7 @@ def build_embed(track: Dict[str, Any]) -> Dict[str, Any]:
             }
         ],
         "footer": {
-            "text": "Fortnite Jam Tracks"
+            "text": footer_text
         }
     }
 
