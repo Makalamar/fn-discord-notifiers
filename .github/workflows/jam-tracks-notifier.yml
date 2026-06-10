@@ -1,5 +1,8 @@
 name: Fortnite Jam Tracks Notifier
 
+# This workflow uses its own Discord webhook (DISCORD_JAM_WEBHOOK_URL)
+# so Jam Tracks can be posted to a different channel than the INI hotfixes.
+
 on:
   schedule:
     # Check every 30 minutes. New Jam Tracks usually drop ~once per week.
@@ -8,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "DRY_RUN (affiche les messages sans les poster sur Discord)"
+        description: "DRY_RUN (affiche l'embed sans le poster sur Discord)"
         required: false
         default: false
         type: boolean
@@ -38,7 +41,8 @@ jobs:
 
       - name: Run Jam Tracks Notifier
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # Use a dedicated webhook (different from the INI hotfix one)
+          DISCORD_JAM_WEBHOOK_URL: ${{ secrets.DISCORD_JAM_WEBHOOK_URL }}
           DRY_RUN: ${{ github.event.inputs.dry_run && '1' || '0' }}
         run: python scripts/jam_tracks_notifier.py
 

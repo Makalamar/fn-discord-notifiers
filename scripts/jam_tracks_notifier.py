@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 Fortnite Jam Tracks Notifier
-Detects new Jam Tracks from the public API and posts them to Discord.
+Detects new Jam Tracks from the public API and posts them as rich embeds
+to a dedicated Discord webhook (separate from INI hotfixes).
 """
 
 import os
@@ -12,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Set
 
 # ==================== CONFIG ====================
-DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_JAM_WEBHOOK_URL", "").strip()
 DRY_RUN = os.environ.get("DRY_RUN", "0") == "1" or not DISCORD_WEBHOOK_URL
 
 STATE_FILE = "data/notified_jam_tracks.json"
@@ -77,7 +78,8 @@ def format_new_until(added_str: str) -> str:
     except Exception:
         return "N/A"
 
-def build_message(track: Dict[str, Any]) -> str:
+def build_embed(track: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a rich Discord embed with the album art as thumbnail (top-right)."""
     title = track.get("title", "Unknown Track")
     artist = track.get("artist", "Unknown Artist")
     year = track.get("releaseYear")
@@ -86,14 +88,15 @@ def build_message(track: Dict[str, Any]) -> str:
     tid = track.get("id", "N/A")
     duration = format_duration(track.get("duration", 0))
     bpm = track.get("bpm", 0)
+    album_art = track.get("albumArt")
 
-    # Rating (not directly in the public API we use - using the format from your example)
+    # Rating (format matching your example)
     rating = "Teen E"
 
     # New Until (approximate: added + 7 days)
     new_until = format_new_until(track.get("added"))
 
-    # Difficulty (6 values from API → bars of 8 segments)
+    # Difficulty bars (8 segments)
     diff = track.get("difficulty", {})
     instruments = [
         ("Vocals", diff.get("vocals", 0)),
@@ -103,51 +106,83 @@ def build_message(track: Dict[str, Any]) -> str:
         ("Plastic Bass", diff.get("plasticBass", 0)),
         ("Plastic Drums", diff.get("plasticDrums", 0)),
     ]
-
     diff_lines = [f"{name}: {make_difficulty_bar(val)}" for name, val in instruments]
 
-    # Key/Scale is not provided by the current public API.
-    # We show BPM and a placeholder so the layout matches the requested format.
+    # Key/Scale placeholder (API doesn't provide key yet)
     key_scale_tempo = f"N/A ({bpm} BPM)"
 
-    message = f"""**New Track Detected**
+    embed = {
+        "title": "New Track Detected",
+        "description": f"**{name_line}**",
+        "color": 0x9b59b6,  # Nice purple (Fortnite-ish)
+        "thumbnail": {
+            "url": album_art
+        } if album_art else None,
+        "fields": [
+            {
+                "name": "Rating",
+                "value": rating,
+                "inline": True
+            },
+            {
+                "name": "Track ID",
+                "value": tid,
+                "inline": True
+            },
+            {
+                "name": "Duration",
+                "value": duration,
+                "inline": True
+            },
+            {
+                "name": "Key / Scale / Tempo",
+                "value": key_scale_tempo,
+                "inline": True
+            },
+            {
+                "name": "New Until",
+                "value": new_until,
+                "inline": True
+            },
+            {
+                "name": "Difficulty Chart",
+                "value": "\n".join(diff_lines),
+                "inline": False
+            }
+        ],
+        "footer": {
+            "text": "Fortnite Jam Tracks"
+        }
+    }
 
-**{name_line}**
+    # Remove thumbnail key if no image (Discord doesn't like null)
+    if not album_art:
+        embed.pop("thumbnail", None)
 
-```
-Rating          Track ID                  Duration
-{rating}               {tid}       {duration}
-
-Key / Scale / Tempo          New Until
-{key_scale_tempo}           {new_until}
-```
-
-**Difficulty Chart**
-""" + "\n".join(diff_lines)
-
-    return message
+    return embed
 
 # ==================== DISCORD ====================
 
-def send_discord(content: str) -> None:
+def send_discord(embed: Dict[str, Any]) -> None:
     if DRY_RUN:
         print("\n" + "=" * 60)
-        print("DRY RUN - Message that would be sent:")
+        print("DRY RUN - Embed that would be sent:")
         print("=" * 60)
-        print(content)
+        print(json.dumps({"embeds": [embed]}, indent=2, ensure_ascii=False))
         print("=" * 60 + "\n")
         return
 
     if not DISCORD_WEBHOOK_URL:
-        print("[ERROR] DISCORD_WEBHOOK_URL not set")
+        print("[ERROR] DISCORD_JAM_WEBHOOK_URL not set")
         return
 
     try:
-        r = requests.post(DISCORD_WEBHOOK_URL, json={"content": content}, timeout=15)
+        payload = {"embeds": [embed]}
+        r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=15)
         if r.status_code in (200, 204):
-            print("[DISCORD] New track notification sent successfully")
+            print("[DISCORD] New Jam Track embed sent successfully")
         else:
-            print(f"[DISCORD] Webhook error {r.status_code}: {r.text[:250]}")
+            print(f"[DISCORD] Webhook error {r.status_code}: {r.text[:300]}")
     except Exception as e:
         print(f"[DISCORD] Exception: {e}")
 
@@ -191,8 +226,8 @@ def main():
     print(f"[INFO] Detected {len(new_tracks)} new Jam Track(s)")
 
     for track in new_tracks:
-        msg = build_message(track)
-        send_discord(msg)
+        embed = build_embed(track)
+        send_discord(embed)
         # Add immediately so if one send fails we don't retry spam on next run
         notified.add(track["id"])
 
