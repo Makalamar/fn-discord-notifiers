@@ -1,0 +1,61 @@
+name: Fortnite Jam Tracks Notifier
+
+on:
+  schedule:
+    # Check every 30 minutes. New Jam Tracks usually drop ~once per week.
+    # This frequency lets us catch them quickly without hammering the API.
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "DRY_RUN (affiche les messages sans les poster sur Discord)"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Run Jam Tracks Notifier
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DRY_RUN: ${{ github.event.inputs.dry_run && '1' || '0' }}
+        run: python scripts/jam_tracks_notifier.py
+
+      - name: Commit notified Jam Tracks state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Re-auth for push
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
+          git add -f data/notified_jam_tracks.json
+
+          if git diff --cached --quiet; then
+            echo "No new Jam Tracks to record."
+          else
+            git commit -m "chore: update notified Jam Tracks [skip ci]"
+            git push
+            echo "Jam Tracks state committed."
+          fi
