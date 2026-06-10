@@ -1,4 +1,7 @@
-name: Fortnite INI Hotfix Notifier (Dilly)
+name: Fortnite INI Hotfix Notifier
+
+# High-frequency (every 5 min) notifier for all Epic .ini hotfixes.
+# Posts clean diffs + supports manual notes.
 
 on:
   schedule:

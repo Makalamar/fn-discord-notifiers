@@ -1,7 +1,7 @@
 name: Fortnite Jam Tracks Notifier
 
-# This workflow uses its own Discord webhook (DISCORD_JAM_WEBHOOK_URL)
-# so Jam Tracks can be posted to a different channel than the INI hotfixes.
+# Uses a dedicated secret (DISCORD_JAM_WEBHOOK_URL) so it can post
+# to a separate Discord channel from the INI Hotfix notifier.
 
 on:
   schedule:
