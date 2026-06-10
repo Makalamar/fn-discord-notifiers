@@ -9,6 +9,7 @@ to a dedicated Discord webhook (separate from INI hotfixes).
 import os
 import json
 import requests
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Set
 
@@ -128,8 +129,15 @@ def build_embed(track: Dict[str, Any]) -> Dict[str, Any]:
     # Key/Scale placeholder (API doesn't provide key yet)
     key_scale_tempo = f"N/A ({bpm} BPM)"
 
+    # Apple Music direct search link
+    search_term = f"{title} {artist}"
+    if year:
+        search_term += f" {year}"
+    encoded = urllib.parse.quote(search_term)
+    apple_music_url = f"https://music.apple.com/search?term={encoded}"
+
     now = datetime.now().strftime("%d/%m/%Y %H:%M")
-    footer_text = f"Jam Tracks | Property of MakaStats•{now}"
+    footer_text = f"Jam Tracks | Property of MakaStats • {now}"
 
     embed = {
         "title": "🎵 New Track Detected",
@@ -163,6 +171,11 @@ def build_embed(track: Dict[str, Any]) -> Dict[str, Any]:
                 "name": "🗓️ New Until",
                 "value": new_until,
                 "inline": True
+            },
+            {
+                "name": "🎵 Listen on Apple Music",
+                "value": f"[▶️ Play on Apple Music]({apple_music_url})",
+                "inline": False
             },
             {
                 "name": "📊 Difficulty Chart",
