@@ -215,7 +215,19 @@ def main():
         latest = sorted_tracks[0]
         embed = build_embed(latest)
         print(f"[TEST] Dernière track : {latest.get('title')} - {latest.get('artist')} (added: {latest.get('added')})")
-        send_discord(embed)
+
+        if DRY_RUN:
+            # User checked dry_run + test_last_track → just preview the embed JSON
+            print("\n" + "=" * 60)
+            print("DRY RUN - Embed that would be sent:")
+            print("=" * 60)
+            print(json.dumps({"embeds": [embed]}, indent=2, ensure_ascii=False))
+            print("=" * 60 + "\n")
+        else:
+            # Real send: the TEST checkbox forces a live Discord message
+            # so you can verify the embed + thumbnail on Discord
+            send_discord(embed)
+
         print("[TEST] Terminé (le state 'notified' n'a pas été modifié).")
         return
     # =====================================================
