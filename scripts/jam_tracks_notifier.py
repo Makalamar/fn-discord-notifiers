@@ -79,6 +79,18 @@ def format_new_until(added_str: str) -> str:
     except Exception:
         return "N/A"
 
+
+def get_new_until_timestamp(added_str: str) -> int | None:
+    """Return Unix timestamp for Discord <t:timestamp> format (added + 7 days)."""
+    if not added_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(added_str.replace("Z", "+00:00"))
+        until = dt + timedelta(days=7)
+        return int(until.timestamp())
+    except Exception:
+        return None
+
 def build_embed(track: Dict[str, Any]) -> Dict[str, Any]:
     """Build a rich Discord embed with the album art as thumbnail (top-right)."""
     title = track.get("title", "Unknown Track")
@@ -94,18 +106,22 @@ def build_embed(track: Dict[str, Any]) -> Dict[str, Any]:
     # Rating (format matching your example)
     rating = "Teen E"
 
-    # New Until (approximate: added + 7 days)
-    new_until = format_new_until(track.get("added"))
+    # New Until as Discord timestamp (added + 7 days)
+    new_until_ts = get_new_until_timestamp(track.get("added"))
+    if new_until_ts:
+        new_until = f"<t:{new_until_ts}:F> (<t:{new_until_ts}:R>)"
+    else:
+        new_until = "N/A"
 
-    # Difficulty bars (8 segments)
+    # Difficulty bars (8 segments) with emojis for quick scanning
     diff = track.get("difficulty", {})
     instruments = [
-        ("Vocals", diff.get("vocals", 0)),
-        ("Guitar", diff.get("guitar", 0)),
-        ("Bass", diff.get("bass", 0)),
-        ("Drums", diff.get("drums", 0)),
-        ("Plastic Bass", diff.get("plasticBass", 0)),
-        ("Plastic Drums", diff.get("plasticDrums", 0)),
+        ("🎤 Vocals", diff.get("vocals", 0)),
+        ("🎸 Guitar", diff.get("guitar", 0)),
+        ("🎸 Bass", diff.get("bass", 0)),
+        ("🥁 Drums", diff.get("drums", 0)),
+        ("🎮 Plastic Bass", diff.get("plasticBass", 0)),
+        ("🎮 Plastic Drums", diff.get("plasticDrums", 0)),
     ]
     diff_lines = [f"{name}: {make_difficulty_bar(val)}" for name, val in instruments]
 
@@ -121,32 +137,32 @@ def build_embed(track: Dict[str, Any]) -> Dict[str, Any]:
         } if album_art else None,
         "fields": [
             {
-                "name": "Rating",
+                "name": "🏷️ Rating",
                 "value": rating,
                 "inline": True
             },
             {
-                "name": "Track ID",
+                "name": "🆔 Track ID",
                 "value": tid,
                 "inline": True
             },
             {
-                "name": "Duration",
+                "name": "⏱️ Duration",
                 "value": duration,
                 "inline": True
             },
             {
-                "name": "Key / Scale / Tempo",
+                "name": "🎹 Key / Scale / Tempo",
                 "value": key_scale_tempo,
                 "inline": True
             },
             {
-                "name": "New Until",
+                "name": "🗓️ New Until",
                 "value": new_until,
                 "inline": True
             },
             {
-                "name": "Difficulty Chart",
+                "name": "📊 Difficulty Chart",
                 "value": "\n".join(diff_lines),
                 "inline": False
             }
