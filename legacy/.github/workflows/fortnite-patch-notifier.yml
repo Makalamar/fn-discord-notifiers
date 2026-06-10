@@ -1,0 +1,52 @@
+name: Fortnite Patch Notifier
+
+on:
+  schedule:
+    # Check every 20 minutes for new official patches
+    - cron: "*/20 * * * *"
+  workflow_dispatch:   # Allow manual runs from the Actions tab
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # Needed to commit & push the last_seen state file
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Fortnite Discord notifier
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python scripts/fortnite_discord_notifier.py
+
+      - name: Commit updated state (if any new patches were posted)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Re-authenticate the remote for push (required when persist-credentials: false)
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
+          if git diff --quiet data/last_notified.json; then
+            echo "No state changes to commit."
+          else
+            git add data/last_notified.json
+            git commit -m "chore: update last notified patch [skip ci]"
+            git push
+            echo "State committed and pushed."
+          fi
