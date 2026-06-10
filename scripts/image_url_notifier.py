@@ -18,6 +18,7 @@ DRY_RUN = os.environ.get("DRY_RUN", "0") == "1" or not DISCORD_WEBHOOK_URL
 
 STATE_FILE = "data/notified_image_urls.json"
 NEWS_API_URL = "https://fortnite-api.com/v2/news"
+EGS_STOREFRONT_URL = "https://store-site-backend-static-ipv4.ak.epicgames.com/storefrontLayout?locale=en-US"
 
 # Supported extensions for images and videos
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
@@ -65,6 +66,16 @@ def fetch_news() -> Dict[str, Any]:
         return resp.json().get("data", {})
     except Exception as e:
         print(f"[API] Failed to fetch news: {e}")
+        return {}
+
+def fetch_egs_storefront() -> Dict[str, Any]:
+    """Fetch Epic Games Store storefront layout, which contains many launcher/keyart images and promos."""
+    try:
+        resp = requests.get(EGS_STOREFRONT_URL, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        print(f"[API] Failed to fetch EGS storefront: {e}")
         return {}
 
 def build_embed(url: str) -> Dict[str, Any]:
@@ -117,12 +128,14 @@ def main():
 
     notified = load_notified()
     news_data = fetch_news()
+    store_data = fetch_egs_storefront()
 
-    if not news_data:
-        print("[ERROR] No news data received")
+    if not news_data and not store_data:
+        print("[ERROR] No data received from any source")
         return
 
-    current_urls = extract_media_urls(news_data)
+    all_data = {"news": news_data, "store": store_data}
+    current_urls = extract_media_urls(all_data)
     new_urls = [u for u in current_urls if u not in notified]
 
     if not notified:
