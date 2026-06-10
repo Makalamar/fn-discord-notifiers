@@ -1,10 +1,13 @@
 # Fortnite Discord Notifiers
 
-[![INI Hotfix Notifier](https://github.com/Makalamar/fortnite-update-history/actions/workflows/ini-hotfix-notifier.yml/badge.svg)](https://github.com/Makalamar/fortnite-update-history/actions/workflows/ini-hotfix-notifier.yml)
-[![Jam Tracks Notifier](https://github.com/Makalamar/fortnite-update-history/actions/workflows/jam-tracks-notifier.yml/badge.svg)](https://github.com/Makalamar/fortnite-update-history/actions/workflows/jam-tracks-notifier.yml)
+[![Stars](https://img.shields.io/github/stars/Makalamar/fn-discord-notifiers?style=social)](https://github.com/Makalamar/fn-discord-notifiers/stargazers)
+[![Forks](https://img.shields.io/github/forks/Makalamar/fn-discord-notifiers?style=social)](https://github.com/Makalamar/fn-discord-notifiers/network/members)
+[![Repo Size](https://img.shields.io/github/repo-size/Makalamar/fn-discord-notifiers)](https://github.com/Makalamar/fn-discord-notifiers)
+[![INI Hotfix Notifier](https://github.com/Makalamar/fn-discord-notifiers/actions/workflows/ini-hotfix-notifier.yml/badge.svg)](https://github.com/Makalamar/fn-discord-notifiers/actions/workflows/ini-hotfix-notifier.yml)
+[![Jam Tracks Notifier](https://github.com/Makalamar/fn-discord-notifiers/actions/workflows/jam-tracks-notifier.yml/badge.svg)](https://github.com/Makalamar/fn-discord-notifiers/actions/workflows/jam-tracks-notifier.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/release/python-3130/)
-[![Last commit](https://img.shields.io/github/last-commit/Makalamar/fortnite-update-history)](https://github.com/Makalamar/fortnite-update-history/commits/main)
+[![Last commit](https://img.shields.io/github/last-commit/Makalamar/fn-discord-notifiers)](https://github.com/Makalamar/fn-discord-notifiers/commits/main)
 
 **Automatic Discord notifications for Fortnite updates — fast, clean, and reliable.**
 
