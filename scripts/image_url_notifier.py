@@ -63,6 +63,35 @@ def extract_media_urls(data: Any) -> List[str]:
     recurse(data)
     return urls
 
+
+def is_fortnite_related(url: str) -> bool:
+    """Filter to keep only Fortnite-related media URLs from the examples and patterns."""
+    u = url.lower()
+    if "fortnite" in u:
+        return True
+    if "fnbr" in u or "fn-og" in u or "fn-" in u:
+        return True
+    if any(f"c{i}s" in u for i in range(1, 10)):  # c1s to c9s etc. for chapters/seasons
+        return True
+    if any(kw in u for kw in ["egs-launcher", "keyart", "discovertile", "blade", "egs-"]):
+        return True
+    if "store-images.s-microsoft.com" in u:
+        # Fortnite Microsoft Store app images (from user's examples)
+        fortnite_ms_app_ids = ["64545", "24804", "35487"]
+        if any(app in u for app in fortnite_ms_app_ids):
+            return True
+        if "fortnite" in u:
+            return True
+        return False
+    if "epic-games-store-cdn.qstv.on.epicgames.com" in u:
+        # Store videos and manifests, typically Fortnite as per examples
+        return True
+    if "cdn2.unrealengine.com" in u:
+        # Additional Fortnite patterns
+        return any(kw in u for kw in ["fortnite", "fnbr", "fn-", "egs-", "keyart", "blade", "discover"])
+    return False
+
+
 def fetch_news() -> Dict[str, Any]:
     try:
         resp = requests.get(NEWS_API_URL, timeout=30)
@@ -141,6 +170,7 @@ def main():
 
     all_data = {"news": news_data, "store": store_data}
     current_urls = extract_media_urls(all_data)
+    current_urls = [u for u in current_urls if is_fortnite_related(u)]
 
     # ===================== TEST MODE =====================
     if TEST_LAST_MEDIA:
