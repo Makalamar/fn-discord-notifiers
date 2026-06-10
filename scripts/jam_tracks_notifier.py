@@ -173,13 +173,13 @@ def build_embed(track: Dict[str, Any]) -> Dict[str, Any]:
                 "inline": True
             },
             {
-                "name": "🎵 Listen on Apple Music",
-                "value": f"[▶️ Play on Apple Music]({apple_music_url})",
+                "name": "📊 Difficulty Chart",
+                "value": "\n".join(diff_lines),
                 "inline": False
             },
             {
-                "name": "📊 Difficulty Chart",
-                "value": "\n".join(diff_lines),
+                "name": "🎵 Listen on Apple Music",
+                "value": f"[▶️ Play on Apple Music]({apple_music_url})",
                 "inline": False
             }
         ],
