@@ -5,16 +5,18 @@
 [![Repo Size](https://img.shields.io/github/repo-size/Makalamar/fn-discord-notifiers)](https://github.com/Makalamar/fn-discord-notifiers)
 [![INI Hotfix Notifier](https://github.com/Makalamar/fn-discord-notifiers/actions/workflows/ini-hotfix-notifier.yml/badge.svg)](https://github.com/Makalamar/fn-discord-notifiers/actions/workflows/ini-hotfix-notifier.yml)
 [![Jam Tracks Notifier](https://github.com/Makalamar/fn-discord-notifiers/actions/workflows/jam-tracks-notifier.yml/badge.svg)](https://github.com/Makalamar/fn-discord-notifiers/actions/workflows/jam-tracks-notifier.yml)
+[![Image/Video URL Notifier](https://github.com/Makalamar/fn-discord-notifiers/actions/workflows/image-url-notifier.yml/badge.svg)](https://github.com/Makalamar/fn-discord-notifiers/actions/workflows/image-url-notifier.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/release/python-3130/)
 [![Last commit](https://img.shields.io/github/last-commit/Makalamar/fn-discord-notifiers)](https://github.com/Makalamar/fn-discord-notifiers/commits/main)
 
 **Automatic Discord notifications for Fortnite updates — fast, clean, and reliable.**
 
-This repository contains two focused GitHub Actions bots that post to Discord:
+This repository contains three focused GitHub Actions bots that post to Discord:
 
 - **INI Hotfix Notifier** — Real-time detection of all official `.ini` hotfixes (every 5 minutes)
 - **Jam Tracks Notifier** — Detection of new Jam Tracks (Festival) with rich embeds + album art
+- **Image/Video URL Notifier** — Detection of new promotional image and video URLs (every 15 minutes) posted as clean embeds
 
 ---
 
@@ -46,6 +48,16 @@ This repository contains two focused GitHub Actions bots that post to Discord:
 - Dedicated webhook support (separate channel from hotfixes)
 - Built-in **test mode**: manually trigger to send the latest added track for verification
 
+### Image/Video URL Notifier
+- Checks **every 15 minutes**
+- Extracts image and video URLs from the official Fortnite news API
+- Posts clean embeds with:
+  - The full URL as a clickable link
+  - The image displayed large (if it's an image)
+  - Video support for common formats
+- Dedicated webhook (separate channel recommended)
+- Tracks already-seen URLs in `data/notified_image_urls.json`
+
 ---
 
 ## Repository Name Recommendation
@@ -71,13 +83,15 @@ Go to your repository → **Settings → Secrets and variables → Actions** and
 |-------------------------------|--------------------------------------------------|--------------------------|
 | `DISCORD_WEBHOOK_URL`         | Webhook for INI Hotfix notifications             | INI Hotfix Notifier      |
 | `DISCORD_JAM_WEBHOOK_URL`     | (Optional) Separate webhook for Jam Tracks       | Jam Tracks Notifier      |
+| `DISCORD_IMAGE_URL_WEBHOOK_URL` | Dedicated webhook for new image/video URLs     | Image/Video URL Notifier |
 
 ### 2. Workflows
 
-Both notifiers are independent:
+All notifiers are independent:
 
 - `Fortnite INI Hotfix Notifier` → runs every 5 minutes
 - `Fortnite Jam Tracks Notifier` → runs every 30 minutes
+- `Fortnite Image/Video URL Notifier` → runs every 15 minutes
 
 You can trigger them manually anytime from the **Actions** tab.
 
