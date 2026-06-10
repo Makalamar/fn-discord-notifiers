@@ -190,6 +190,7 @@ def send_discord(embed: Dict[str, Any]) -> None:
 # ==================== MAIN ====================
 
 def main():
+    global DRY_RUN
     print(f"=== Fortnite Jam Tracks Notifier ===")
     print(f"Time: {datetime.now(timezone.utc).isoformat()}")
 
