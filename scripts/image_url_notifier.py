@@ -3,12 +3,14 @@
 """
 Fortnite Image/Video URL Notifier
 Detects new image and video URLs from Fortnite-only endpoints and posts them
-as embeds via a dedicated Discord webhook.
+via a dedicated Discord webhook.
 
 Sources used (all Fortnite-scoped only):
-  - fortnite-api.com/v2/news
-  - fortnitecontent-website-prod07.ol.epicgames.com (BR news, STW news, Creative, dynamic BG)
-  - epicgames.com/fortnite/api/blog (patch notes)
+  - fortnite-api.com/v2/news        (aggregated BR + STW + Creative)
+  - fortnite-api.com/v2/news/br     (BR news images)
+  - fortnite-api.com/v2/news/stw    (STW news images)
+  - fortnite-api.com/v2/news/creative (Creative news images)
+  - fortnitecontent-website-prod07.ol.epicgames.com/content/api/pages/fortnite-game/dynamicbackgrounds
 
 Ref: https://github.com/LeleDerGrasshalmi/FortniteEndpointsDocumentation
 """
@@ -26,23 +28,23 @@ TEST_LAST_MEDIA = os.environ.get("TEST_LAST_MEDIA", "0") == "1"
 
 STATE_FILE = "data/notified_image_urls.json"
 
-# ── Fortnite-API wrapper (news) ────────────────────────────────────────────────────
+# ── fortnite-api.com endpoints (news, by gamemode) ──────────────────────────
 NEWS_API_URL = "https://fortnite-api.com/v2/news"
 
-# ── Official Fortnite-only content endpoints ─────────────────────────────────
-# Source: https://github.com/LeleDerGrasshalmi/FortniteEndpointsDocumentation
-# All of these are scoped exclusively to Fortnite; no cross-game pollution.
+# Individual gamemode news endpoints (same API, finer granularity)
+NEWS_GAMEMODE_ENDPOINTS = [
+    ("news_br",       "https://fortnite-api.com/v2/news/br"),
+    ("news_stw",      "https://fortnite-api.com/v2/news/stw"),
+    ("news_creative", "https://fortnite-api.com/v2/news/creative"),
+]
+
+# ── Official Fortnite-only content endpoints (Epic CMS) ─────────────────────
+# Only endpoints confirmed active are kept here.
+# battleroyal-news, save-the-world-news, creative-news and the blog
+# endpoint all return 404 and have been replaced by fortnite-api.com above.
 FORTNITE_CONTENT_ENDPOINTS = [
-    # Dynamic backgrounds (launcher blade images, season keyarts)
+    # Dynamic backgrounds (launcher blade images, season keyarts) — still active
     "https://fortnitecontent-website-prod07.ol.epicgames.com/content/api/pages/fortnite-game/dynamicbackgrounds",
-    # BR in-game news / MOTD
-    "https://fortnitecontent-website-prod07.ol.epicgames.com/content/api/pages/fortnite-game/battleroyal-news",
-    # Save the World news
-    "https://fortnitecontent-website-prod07.ol.epicgames.com/content/api/pages/fortnite-game/save-the-world-news",
-    # Creative news
-    "https://fortnitecontent-website-prod07.ol.epicgames.com/content/api/pages/fortnite-game/creative-news",
-    # Fortnite blog / patch notes (keyarts + gameplay screenshots)
-    "https://www.epicgames.com/fortnite/api/blog/getPosts?locale=en-US&postsPerPage=5",
 ]
 
 # Supported media extensions
@@ -50,6 +52,7 @@ IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
 VIDEO_EXTS = (".mp4", ".webm", ".mov", ".mpd", ".m3u8")
 
 # ── CDN allow-list: domains that serve Fortnite media ─────────────────────────
+# media.fortniteapi.io is the CDN used by fortnite-api.com for news images.
 FORTNITE_CDN_DOMAINS = (
     "cdn2.unrealengine.com",
     "media.fortniteapi.io",
@@ -74,6 +77,9 @@ FORTNITE_URL_PATTERNS = (
     "rocketracing",
     "lego-fortnite",
     "legofortnite",
+    "savetheworldnews",
+    "battleroyal",
+    "creativenews",
 )
 
 
@@ -127,6 +133,7 @@ def is_fortnite_media(url: str) -> bool:
     if not any(domain in u for domain in FORTNITE_CDN_DOMAINS):
         return False
 
+    # Fortnite-exclusive domains: no additional slug check needed
     fortnite_exclusive_domains = (
         "fortnitecontent-website-prod07.ol.epicgames.com",
         "epic-games-store-cdn.qstv.on.epicgames.com",
@@ -135,10 +142,12 @@ def is_fortnite_media(url: str) -> bool:
     if any(domain in u for domain in fortnite_exclusive_domains):
         return True
 
+    # Shared CDNs (cdn2.unrealengine.com): require a Fortnite path slug
     return any(pattern in u for pattern in FORTNITE_URL_PATTERNS)
 
 
 def fetch_news() -> Dict[str, Any]:
+    """Fetch aggregated news from fortnite-api.com (BR + STW + Creative combined)."""
     try:
         resp = requests.get(NEWS_API_URL, timeout=30)
         resp.raise_for_status()
@@ -147,8 +156,21 @@ def fetch_news() -> Dict[str, Any]:
         print(f"[API] Failed to fetch news: {e}")
         return {}
 
+def fetch_news_by_gamemode() -> Dict[str, Any]:
+    """Fetch per-gamemode news from fortnite-api.com (finer granularity)."""
+    merged: Dict[str, Any] = {}
+    for key, url in NEWS_GAMEMODE_ENDPOINTS:
+        try:
+            resp = requests.get(url, timeout=30)
+            resp.raise_for_status()
+            merged[key] = resp.json().get("data", {})
+            print(f"[API] Fetched: {key}")
+        except Exception as e:
+            print(f"[API] Failed to fetch {url}: {e}")
+    return merged
+
 def fetch_fortnite_content_endpoints() -> Dict[str, Any]:
-    """Fetch all Fortnite-scoped content endpoints and merge results."""
+    """Fetch active Epic CMS content endpoints (currently: dynamicbackgrounds only)."""
     merged: Dict[str, Any] = {}
     for url in FORTNITE_CONTENT_ENDPOINTS:
         try:
@@ -163,7 +185,7 @@ def fetch_fortnite_content_endpoints() -> Dict[str, Any]:
 
 def build_message(url: str) -> str:
     """Build a plain-text message: URL on first line, bold date/time on second line.
-    Discord automatically renders image previews (thumbnail on the right) for image URLs.
+    Discord automatically renders image previews for image URLs.
     """
     now = datetime.now().strftime("%d/%m/%Y %H:%M")
     return f"{url}\n**{now}**"
@@ -199,13 +221,18 @@ def main():
     notified = load_notified()
 
     news_data = fetch_news()
+    gamemode_data = fetch_news_by_gamemode()
     content_data = fetch_fortnite_content_endpoints()
 
-    if not news_data and not content_data:
+    if not news_data and not gamemode_data and not content_data:
         print("[ERROR] No data received from any source")
         return
 
-    all_data = {"news": news_data, "content": content_data}
+    all_data = {
+        "news": news_data,
+        "gamemode": gamemode_data,
+        "content": content_data,
+    }
 
     raw_urls = extract_media_urls(all_data)
     current_urls = [u for u in raw_urls if is_fortnite_media(u)]
