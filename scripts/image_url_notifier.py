@@ -6,11 +6,15 @@ Detects new image and video URLs from Fortnite-only endpoints and posts them
 via a dedicated Discord webhook.
 
 Sources used (all Fortnite-scoped only):
-  - fortnite-api.com/v2/news        (aggregated BR + STW + Creative)
-  - fortnite-api.com/v2/news/br     (BR news images)
-  - fortnite-api.com/v2/news/stw    (STW news images)
-  - fortnite-api.com/v2/news/creative (Creative news images)
-  - fortnitecontent-website-prod07.ol.epicgames.com/content/api/pages/fortnite-game/dynamicbackgrounds
+  - fortnitecontent-website-prod07.ol.epicgames.com/content/api/pages/fortnite-game
+      -> dynamicbackgrounds  (lobby/vault keyarts — still active)
+      -> battleroyalnews     (BR news images — extracted from full page response)
+      -> savetheworld        (STW news images — extracted from full page response)
+      -> creative            (Creative news images — extracted from full page response)
+
+The old /fortnite-game/<subkey> routes (battleroyal-news, save-the-world-news,
+creative-news) return 404. The correct approach per the official docs is to
+fetch /content/api/pages/fortnite-game once and navigate into the JSON keys.
 
 Ref: https://github.com/LeleDerGrasshalmi/FortniteEndpointsDocumentation
 """
@@ -28,23 +32,22 @@ TEST_LAST_MEDIA = os.environ.get("TEST_LAST_MEDIA", "0") == "1"
 
 STATE_FILE = "data/notified_image_urls.json"
 
-# ── fortnite-api.com endpoints (news, by gamemode) ──────────────────────────
-NEWS_API_URL = "https://fortnite-api.com/v2/news"
+# ── Official Epic CMS — single call, all sections extracted from JSON ────────
+# Fetching /fortnite-game once is more efficient and avoids the 404 sub-key issue.
+# Keys below are the top-level JSON properties present in the response.
+FN_CONTENT_BASE_URL = (
+    "https://fortnitecontent-website-prod07.ol.epicgames.com"
+    "/content/api/pages/fortnite-game"
+)
 
-# Individual gamemode news endpoints (same API, finer granularity)
-NEWS_GAMEMODE_ENDPOINTS = [
-    ("news_br",       "https://fortnite-api.com/v2/news/br"),
-    ("news_stw",      "https://fortnite-api.com/v2/news/stw"),
-    ("news_creative", "https://fortnite-api.com/v2/news/creative"),
-]
-
-# ── Official Fortnite-only content endpoints (Epic CMS) ─────────────────────
-# Only endpoints confirmed active are kept here.
-# battleroyal-news, save-the-world-news, creative-news and the blog
-# endpoint all return 404 and have been replaced by fortnite-api.com above.
-FORTNITE_CONTENT_ENDPOINTS = [
-    # Dynamic backgrounds (launcher blade images, season keyarts) — still active
-    "https://fortnitecontent-website-prod07.ol.epicgames.com/content/api/pages/fortnite-game/dynamicbackgrounds",
+# Sub-sections we want to extract from the full fortnite-game response.
+# Each tuple is (label_for_logs, dot-separated path inside the JSON).
+# e.g. "battleroyalnews.news.messages" means data["battleroyalnews"]["news"]["messages"]
+FN_CONTENT_SECTIONS = [
+    ("dynamicbackgrounds", "dynamicbackgrounds"),
+    ("battleroyalnews",    "battleroyalnews"),
+    ("savetheworld",       "savetheworld"),
+    ("creative",           "creative"),
 ]
 
 # Supported media extensions
@@ -52,7 +55,6 @@ IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
 VIDEO_EXTS = (".mp4", ".webm", ".mov", ".mpd", ".m3u8")
 
 # ── CDN allow-list: domains that serve Fortnite media ─────────────────────────
-# media.fortniteapi.io is the CDN used by fortnite-api.com for news images.
 FORTNITE_CDN_DOMAINS = (
     "cdn2.unrealengine.com",
     "media.fortniteapi.io",
@@ -146,42 +148,31 @@ def is_fortnite_media(url: str) -> bool:
     return any(pattern in u for pattern in FORTNITE_URL_PATTERNS)
 
 
-def fetch_news() -> Dict[str, Any]:
-    """Fetch aggregated news from fortnite-api.com (BR + STW + Creative combined)."""
+def fetch_fortnite_content() -> Dict[str, Any]:
+    """
+    Fetch the full /content/api/pages/fortnite-game response once and extract
+    the relevant sub-sections (dynamicbackgrounds, battleroyalnews, savetheworld,
+    creative).  This replaces the old per-subkey calls that return 404.
+    """
+    result: Dict[str, Any] = {}
     try:
-        resp = requests.get(NEWS_API_URL, timeout=30)
+        resp = requests.get(FN_CONTENT_BASE_URL, timeout=30)
         resp.raise_for_status()
-        return resp.json().get("data", {})
+        page_data = resp.json()
     except Exception as e:
-        print(f"[API] Failed to fetch news: {e}")
-        return {}
+        print(f"[API] Failed to fetch {FN_CONTENT_BASE_URL}: {e}")
+        return result
 
-def fetch_news_by_gamemode() -> Dict[str, Any]:
-    """Fetch per-gamemode news from fortnite-api.com (finer granularity)."""
-    merged: Dict[str, Any] = {}
-    for key, url in NEWS_GAMEMODE_ENDPOINTS:
-        try:
-            resp = requests.get(url, timeout=30)
-            resp.raise_for_status()
-            merged[key] = resp.json().get("data", {})
-            print(f"[API] Fetched: {key}")
-        except Exception as e:
-            print(f"[API] Failed to fetch {url}: {e}")
-    return merged
+    for label, key in FN_CONTENT_SECTIONS:
+        section = page_data.get(key)
+        if section is not None:
+            result[label] = section
+            print(f"[API] Fetched section: {label}")
+        else:
+            print(f"[API] Section '{label}' not found in fortnite-game response")
 
-def fetch_fortnite_content_endpoints() -> Dict[str, Any]:
-    """Fetch active Epic CMS content endpoints (currently: dynamicbackgrounds only)."""
-    merged: Dict[str, Any] = {}
-    for url in FORTNITE_CONTENT_ENDPOINTS:
-        try:
-            resp = requests.get(url, timeout=30)
-            resp.raise_for_status()
-            key = url.split("/")[-1].split("?")[0]
-            merged[key] = resp.json()
-            print(f"[API] Fetched: {key}")
-        except Exception as e:
-            print(f"[API] Failed to fetch {url}: {e}")
-    return merged
+    return result
+
 
 def build_message(url: str) -> str:
     """Build a plain-text message: URL on first line, bold date/time on second line.
@@ -220,39 +211,31 @@ def main():
 
     notified = load_notified()
 
-    news_data = fetch_news()
-    gamemode_data = fetch_news_by_gamemode()
-    content_data = fetch_fortnite_content_endpoints()
+    content_data = fetch_fortnite_content()
 
-    if not news_data and not gamemode_data and not content_data:
+    if not content_data:
         print("[ERROR] No data received from any source")
         return
 
-    all_data = {
-        "news": news_data,
-        "gamemode": gamemode_data,
-        "content": content_data,
-    }
-
-    raw_urls = extract_media_urls(all_data)
+    raw_urls = extract_media_urls(content_data)
     current_urls = [u for u in raw_urls if is_fortnite_media(u)]
 
     print(f"[INFO] {len(raw_urls)} raw URLs found -> {len(current_urls)} passed Fortnite filter")
 
     # ===================== TEST MODE =====================
     if TEST_LAST_MEDIA:
-        print("[TEST] Mode activ\u00e9 : envoi de la derni\u00e8re image/vid\u00e9o d\u00e9tect\u00e9e")
+        print("[TEST] Mode activé : envoi de la dernière image/vidéo détectée")
         if not current_urls:
-            print("[TEST] Aucune URL trouv\u00e9e.")
+            print("[TEST] Aucune URL trouvée.")
             return
         latest_url = current_urls[-1]
-        print(f"[TEST] Derni\u00e8re URL : {latest_url}")
+        print(f"[TEST] Dernière URL : {latest_url}")
         message = build_message(latest_url)
         original_dry = DRY_RUN
         DRY_RUN = False
         send_discord(message)
         DRY_RUN = original_dry
-        print("[TEST] Termin\u00e9 (le state 'notified' n'a pas \u00e9t\u00e9 modifi\u00e9).")
+        print("[TEST] Terminé (le state 'notified' n'a pas été modifié).")
         return
     # =====================================================
 
