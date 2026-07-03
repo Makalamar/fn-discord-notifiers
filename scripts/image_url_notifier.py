@@ -169,49 +169,35 @@ def fetch_fortnite_content_endpoints() -> Dict[str, Any]:
             print(f"[API] Failed to fetch {url}: {e}")
     return merged
 
-def build_embed(url: str) -> Dict[str, Any]:
-    is_video = any(url.lower().endswith(ext) for ext in VIDEO_EXTS)
-    is_image = any(url.lower().endswith(ext) for ext in IMAGE_EXTS)
+def build_message(url: str) -> str:
+    """Build a plain-text message: URL on first line, bold date/time on second line.
+    Discord automatically renders image previews (thumbnail on the right) for image URLs.
+    """
+    now = datetime.now().strftime("%d/%m/%Y %H:%M")
+    return f"{url}\n**{now}**"
 
-    embed: Dict[str, Any] = {
-        "title": "New Image/Video URL Detected",
-        "description": f"[View / Download]({url})",
-        "url": url,
-        "color": 0x00b0f4,
-        "footer": {
-            "text": "Fortnite Image/Video Tracker"
-        }
-    }
-
-    if is_image:
-        embed["image"] = {"url": url}
-    elif is_video:
-        embed["video"] = {"url": url}
-
-    return embed
-
-def send_discord(embed: Dict[str, Any]) -> None:
+def send_discord(message: str) -> None:
     if DRY_RUN:
         print("\n" + "=" * 60)
-        print("DRY RUN - Embed that would be sent:")
+        print("DRY RUN - Message that would be sent:")
         print("=" * 60)
-        print(json.dumps({"embeds": [embed]}, indent=2, ensure_ascii=False))
+        print(message)
         print("=" * 60 + "\n")
         return
 
     if not DISCORD_WEBHOOK_URL:
-        print("[ERROR] DISCORD_IMAGE_URL_WEBHOOK_URL not set")
+        print("[ERROR] No webhook URL configured")
         return
 
+    payload = {"content": message}
     try:
-        payload = {"embeds": [embed]}
-        r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=15)
-        if r.status_code in (200, 204):
-            print("[DISCORD] New media URL posted successfully")
+        resp = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=15)
+        if resp.status_code in (200, 204):
+            print(f"[OK] Sent: {message[:80]}...")
         else:
-            print(f"[DISCORD] Webhook error {r.status_code}: {r.text[:300]}")
+            print(f"[ERROR] Discord returned {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
-        print(f"[DISCORD] Exception: {e}")
+        print(f"[ERROR] Failed to send to Discord: {e}")
 
 def main():
     global DRY_RUN
@@ -267,8 +253,8 @@ def main():
     print(f"[INFO] Detected {len(new_urls)} new media URL(s)")
 
     for url in new_urls:
-        embed = build_embed(url)
-        send_discord(embed)
+        message = build_message(url)
+        send_discord(message)
         notified.add(url)
 
     save_notified(notified)
