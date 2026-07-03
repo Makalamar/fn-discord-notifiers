@@ -174,19 +174,47 @@ def fetch_fortnite_content() -> Dict[str, Any]:
     return result
 
 
-def build_message(url: str) -> str:
-    """Build a plain-text message: URL on first line, bold date/time on second line.
-    Discord automatically renders image previews for image URLs.
-    """
-    now = datetime.now().strftime("%d/%m/%Y %H:%M")
-    return f"{url}\n**{now}**"
+def is_video(url: str) -> bool:
+    """Return True if the URL points to a video file."""
+    return any(url.lower().endswith(ext) for ext in VIDEO_EXTS)
 
-def send_discord(message: str) -> None:
+
+def build_embed(url: str) -> dict:
+    """
+    Build a Discord embed payload for the given media URL.
+
+    Layout (mirrors the url-tracker screenshot):
+      - title   : the raw URL, clickable (links to the media)
+      - image   : thumbnail rendered inline (images only)
+      - color   : Fortnite blue accent
+      - footer  : detection date/time
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    now_display = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    embed: Dict[str, Any] = {
+        "title": url,
+        "url": url,
+        "color": 0x6B21A8,          # Fortnite purple accent
+        "footer": {
+            "text": now_display,
+        },
+        "timestamp": now_iso,
+    }
+
+    # Attach image preview for image files; videos get a plain link embed
+    if not is_video(url):
+        embed["image"] = {"url": url}
+
+    return {"embeds": [embed]}
+
+
+def send_discord(payload: dict) -> None:
     if DRY_RUN:
         print("\n" + "=" * 60)
-        print("DRY RUN - Message that would be sent:")
+        print("DRY RUN - Payload that would be sent:")
         print("=" * 60)
-        print(message)
+        print(json.dumps(payload, indent=2))
         print("=" * 60 + "\n")
         return
 
@@ -194,11 +222,11 @@ def send_discord(message: str) -> None:
         print("[ERROR] No webhook URL configured")
         return
 
-    payload = {"content": message}
     try:
         resp = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=15)
         if resp.status_code in (200, 204):
-            print(f"[OK] Sent: {message[:80]}...")
+            title = payload.get("embeds", [{}])[0].get("title", "")
+            print(f"[OK] Sent embed: {title[:80]}...")
         else:
             print(f"[ERROR] Discord returned {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
@@ -230,10 +258,10 @@ def main():
             return
         latest_url = current_urls[-1]
         print(f"[TEST] Dernière URL : {latest_url}")
-        message = build_message(latest_url)
+        payload = build_embed(latest_url)
         original_dry = DRY_RUN
         DRY_RUN = False
-        send_discord(message)
+        send_discord(payload)
         DRY_RUN = original_dry
         print("[TEST] Terminé (le state 'notified' n'a pas été modifié).")
         return
@@ -255,8 +283,8 @@ def main():
     print(f"[INFO] Detected {len(new_urls)} new media URL(s)")
 
     for url in new_urls:
-        message = build_message(url)
-        send_discord(message)
+        payload = build_embed(url)
+        send_discord(payload)
         notified.add(url)
 
     save_notified(notified)
