@@ -26,7 +26,7 @@ TEST_LAST_MEDIA = os.environ.get("TEST_LAST_MEDIA", "0") == "1"
 
 STATE_FILE = "data/notified_image_urls.json"
 
-# ── Fortnite-API wrapper (news) ──────────────────────────────────────────────
+# ── Fortnite-API wrapper (news) ────────────────────────────────────────────────────
 NEWS_API_URL = "https://fortnite-api.com/v2/news"
 
 # ── Official Fortnite-only content endpoints ─────────────────────────────────
@@ -49,8 +49,7 @@ FORTNITE_CONTENT_ENDPOINTS = [
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
 VIDEO_EXTS = (".mp4", ".webm", ".mov", ".mpd", ".m3u8")
 
-# ── CDN allow-list: domains that serve Fortnite media ────────────────────────
-# Based on real examples observed in Discord output (cf. screenshots)
+# ── CDN allow-list: domains that serve Fortnite media ─────────────────────────
 FORTNITE_CDN_DOMAINS = (
     "cdn2.unrealengine.com",
     "media.fortniteapi.io",
@@ -59,15 +58,14 @@ FORTNITE_CDN_DOMAINS = (
 )
 
 # ── URL slug patterns that confirm Fortnite origin ───────────────────────────
-# Derived from observed CDN URL structures (cdn2.unrealengine.com paths)
 FORTNITE_URL_PATTERNS = (
     "fortnite",
-    "fnbr-",           # e.g. fnbr-41-00-c7s3-egs-launcher-blade
-    "brfnbr-",         # Battle Royale variant
-    "fn-og-",          # OG season
+    "fnbr-",
+    "brfnbr-",
+    "fn-og-",
     "fn-og/",
-    "/fn-",            # generic /fn- prefix in path
-    "fn-c",            # fn-c1s1 etc.
+    "/fn-",
+    "fn-c",
     "gameplayscreenshot",
     "egs-launcher-blade",
     "keyart",
@@ -123,17 +121,12 @@ def is_fortnite_media(url: str) -> bool:
     Two-pass filter:
       1. Domain allow-list  -> CDN must be a known Fortnite CDN.
       2. Path slug check    -> URL path must contain at least one Fortnite pattern.
-
-    This dual check avoids false positives from CDNs that host multi-game assets
-    (e.g. cdn2.unrealengine.com hosts non-Fortnite games too).
     """
     u = url.lower()
 
-    # Pass 1 - domain must be a known Fortnite CDN
     if not any(domain in u for domain in FORTNITE_CDN_DOMAINS):
         return False
 
-    # Pass 2 - for Fortnite-exclusive domains, no slug check needed
     fortnite_exclusive_domains = (
         "fortnitecontent-website-prod07.ol.epicgames.com",
         "epic-games-store-cdn.qstv.on.epicgames.com",
@@ -142,7 +135,6 @@ def is_fortnite_media(url: str) -> bool:
     if any(domain in u for domain in fortnite_exclusive_domains):
         return True
 
-    # For shared CDNs (cdn2.unrealengine.com), require a Fortnite path slug
     return any(pattern in u for pattern in FORTNITE_URL_PATTERNS)
 
 
@@ -228,10 +220,10 @@ def main():
             return
         latest_url = current_urls[-1]
         print(f"[TEST] Derni\u00e8re URL : {latest_url}")
-        embed = build_embed(latest_url)
+        message = build_message(latest_url)
         original_dry = DRY_RUN
         DRY_RUN = False
-        send_discord(embed)
+        send_discord(message)
         DRY_RUN = original_dry
         print("[TEST] Termin\u00e9 (le state 'notified' n'a pas \u00e9t\u00e9 modifi\u00e9).")
         return
