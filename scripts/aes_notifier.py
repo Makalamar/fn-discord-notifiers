@@ -9,7 +9,7 @@ Embed layout (mirrors the FortniteAPI reference style):
   title       : "New Dynamic AES Key Detected"
   description : version string
   fields      : pakchunk filename + key, File Id, File Count, File Size
-  image       : thumbnail from fortnite-api.com (first cosmetic in the chunk, if any)
+  image       : featured image of the first decrypted cosmetic in the chunk
   footer      : "MakaStats • <timestamp>"
   color       : Fortnite purple 0x6B21A8
 
@@ -34,6 +34,7 @@ TEST_MODE: bool          = os.environ.get("TEST_AES", "0") == "1"
 STATE_FILE = "data/notified_aes_keys.json"
 
 AES_URL         = "https://fortnite-api.com/v2/aes"
+COSMETICS_URL   = "https://fortnite-api.com/v2/cosmetics/br"
 EMBED_COLOR     = 0x6B21A8   # Fortnite purple
 FOOTER_TEXT     = "MakaStats"
 
@@ -98,6 +99,43 @@ def fetch_aes() -> Optional[Dict[str, Any]]:
     return None
 
 
+def fetch_cosmetic_for_pak(pak_filename: str) -> Optional[Dict[str, Any]]:
+    """
+    Try to find a cosmetic whose path references this pakchunk number.
+    Falls back to fetching all cosmetics and filtering by path/added date.
+    Returns the first matching cosmetic dict, or None.
+    """
+    # Extract chunk number from filename, e.g. "pakchunk1005-WindowsClient.utoc" -> "1005"
+    chunk_id = None
+    lower = pak_filename.lower()
+    if lower.startswith("pakchunk"):
+        rest = lower[len("pakchunk"):]
+        chunk_id = rest.split("-")[0] if "-" in rest else rest.split(".")[0]
+
+    try:
+        resp = requests.get(COSMETICS_URL, headers=_api_headers(), timeout=30)
+        resp.raise_for_status()
+        payload = resp.json()
+        cosmetics: List[Dict] = payload.get("data", [])
+    except Exception as e:
+        print(f"[API] Failed to fetch cosmetics: {e}")
+        return None
+
+    if not cosmetics:
+        return None
+
+    # Priority 1: match by path containing the chunk id
+    if chunk_id:
+        for c in cosmetics:
+            path = (c.get("path") or "").lower()
+            if f"pakchunk{chunk_id}" in path or f"chunk{chunk_id}" in path:
+                return c
+
+    # Priority 2: most recently added cosmetic (last in list)
+    # fortnite-api returns cosmetics in ascending added order
+    return cosmetics[-1]
+
+
 # ==================== EMBED ====================
 
 def build_embed(key_entry: Dict[str, Any], version: str) -> Dict[str, Any]:
@@ -118,20 +156,39 @@ def build_embed(key_entry: Dict[str, Any], version: str) -> Dict[str, Any]:
     file_count: int = key_entry.get("fileCount", 0)
     file_size:  int = key_entry.get("fileSize",  0)
 
-    # Thumbnail: first image among the pak's files, if any
-    thumbnail_url: Optional[str] = None
-    for f in key_entry.get("files", []) or []:
-        uri = f.get("uri", "") or ""
-        if uri.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
-            thumbnail_url = uri
-            break
-
     now_iso     = datetime.now(timezone.utc).isoformat()
     now_display = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
 
+    # ---- Resolve decrypted cosmetic image + name ----
+    image_url:      Optional[str] = None
+    cosmetic_name:  Optional[str] = None
+    cosmetic_type:  Optional[str] = None
+
+    cosmetic = fetch_cosmetic_for_pak(pak_name)
+    if cosmetic:
+        cosmetic_name = cosmetic.get("name")
+        cosmetic_type = (cosmetic.get("type") or {}).get("displayValue")
+        images: Dict = cosmetic.get("images") or {}
+        # Prefer featured > icon > smallIcon
+        image_url = (
+            images.get("featured")
+            or images.get("icon")
+            or images.get("smallIcon")
+        )
+        if cosmetic_name:
+            print(f"[INFO] Cosmetic matched: {cosmetic_name} ({cosmetic_type})")
+    else:
+        print("[INFO] No cosmetic matched for this pak.")
+
+    # ---- Build description ----
+    description = f"We've found a new dynamic AES key for version **{version}**."
+    if cosmetic_name:
+        type_label = f"{cosmetic_type} • " if cosmetic_type else ""
+        description += f"\n\n**{type_label}{cosmetic_name}**"
+
     embed: Dict[str, Any] = {
         "title":       "New Dynamic AES Key Detected",
-        "description": f"We've found a new dynamic AES key for version **{version}**.",
+        "description": description,
         "color":       EMBED_COLOR,
         "timestamp":   now_iso,
         "footer":      {"text": f"{FOOTER_TEXT} • {now_display}"},
@@ -159,8 +216,8 @@ def build_embed(key_entry: Dict[str, Any], version: str) -> Dict[str, Any]:
         ],
     }
 
-    if thumbnail_url:
-        embed["image"] = {"url": thumbnail_url}
+    if image_url:
+        embed["image"] = {"url": image_url}
 
     return {"embeds": [embed]}
 
