@@ -1,0 +1,66 @@
+name: Fortnite AES Keys Notifier
+
+on:
+  schedule:
+    # Check every 15 minutes for new dynamic AES keys
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "DRY_RUN (affiche l'embed sans poster sur Discord)"
+        required: false
+        default: false
+        type: boolean
+      test_aes:
+        description: "TEST: envoie la dernière clé AES détectée en live sur Discord. Ne modifie pas le state."
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Run AES Keys Notifier
+        env:
+          DISCORD_AES_WEBHOOK_URL: ${{ secrets.DISCORD_AES_WEBHOOK_URL }}
+          FORTNITE_API_KEY: ${{ secrets.FORTNITE_API_KEY }}
+          DRY_RUN: ${{ github.event.inputs.dry_run && '1' || '0' }}
+          TEST_AES: ${{ github.event.inputs.test_aes && '1' || '0' }}
+        run: python scripts/aes_notifier.py
+
+      - name: Commit AES keys state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
+          git add -f data/notified_aes_keys.json
+
+          if git diff --cached --quiet; then
+            echo "No new AES keys to record."
+          else
+            git commit -m "chore: update notified AES keys [skip ci]"
+            git push
+            echo "AES keys state committed."
+          fi
