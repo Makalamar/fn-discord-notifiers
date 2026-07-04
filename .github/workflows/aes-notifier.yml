@@ -55,6 +55,12 @@ jobs:
 
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
 
+          # Ensure the state file exists before attempting git add
+          mkdir -p data
+          if [ ! -f data/notified_aes_keys.json ]; then
+            echo "[]" > data/notified_aes_keys.json
+          fi
+
           git add -f data/notified_aes_keys.json
 
           if git diff --cached --quiet; then
