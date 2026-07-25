@@ -7,7 +7,7 @@ Tracks the storefront artwork Epic swaps in when a new Fortnite version ships,
 and posts every newly seen image to a dedicated Discord webhook.
 
 Sources:
-  1. EGS Store Content API -> cdn2.unrealengine.com/fnbr-* launcher blades & PDP cover art
+  1. EGS Store Content API -> all cdn2.unrealengine.com artwork & screenshots
   2. Fortnite content API / dynamicbackgrounds -> lobby & vault key art
   3. Microsoft Store product page -> store-images.s-microsoft.com artwork
 
@@ -33,8 +33,7 @@ STATE_FILE = os.path.join(
     "notified_image_urls.json",
 )
 
-EMBED_COLOR = 0x6B21A8
-FOOTER_TEXT = "MakaStats"
+EMBED_COLOR = 0x2B2D31  # Discord dark theme
 HTTP_TIMEOUT = 30
 
 # Epic and the console stores both reject requests without a browser User-Agent.
@@ -65,7 +64,7 @@ ALLOWED_IMAGE_DOMAINS = (
 )
 
 MS_IMAGE_RE = re.compile(r"https://store-images\.s-microsoft\.com/image/apps\.[A-Za-z0-9._\-]+")
-FNBR_IMAGE_RE = re.compile(r"https://cdn2\.unrealengine\.com/fnbr-[A-Za-z0-9._\-/]+")
+CDN2_IMAGE_RE = re.compile(r"https://cdn2\.unrealengine\.com/[^\"'\&<>\\\\)]+")
 
 # A URL plus the label describing where it came from.
 Media = Tuple[str, str]
@@ -96,19 +95,12 @@ def strip_query(url: str) -> str:
     return url.split("?", 1)[0]
 
 
-def label_fnbr_image(url: str) -> str:
-    if "ps-launcher-pdpcoverart" in url:
-        return "PS PDP Cover Art"
-    if "egs-launcher-blade" in url:
-        if "1200x1600" in url:
-            return "EGS Launcher Blade (3:4)"
-        if "2560x1440" in url:
-            return "EGS Launcher Blade (16:9)"
-    return "EGS Launcher Blade"
+def label_cdn2_image(url: str) -> str:
+    return "EGS Store Artwork"
 
 
 def fetch_egs_store_content_images() -> List[Media]:
-    """Launcher blades and PDP cover art — these swap on every new Fortnite version."""
+    """All storefront artwork — these swap on every new Fortnite version."""
     try:
         resp = requests.get(EGS_STORE_CONTENT_URL, headers=BROWSER_HEADERS, timeout=HTTP_TIMEOUT)
         resp.raise_for_status()
@@ -117,15 +109,16 @@ def fetch_egs_store_content_images() -> List[Media]:
         return []
 
     # The payload embeds URLs inside markdown, so trim any trailing delimiters.
+    # "Diesel" and V-Bucks assets are static chrome (age ratings, Epic logo, currency banners).
     urls = sorted(
         {
             strip_query(u).rstrip(").#")
-            for u in FNBR_IMAGE_RE.findall(resp.text)
-            if "launcher-blade" in u or "pdpcoverart" in u
+            for u in CDN2_IMAGE_RE.findall(resp.text)
+            if "Diesel" not in u and "v-bucks" not in u.lower() and "vbucks" not in u.lower()
         }
     )
     print(f"[EGS-STORE] {len(urls)} image(s)")
-    return [(u, label_fnbr_image(u)) for u in urls]
+    return [(u, label_cdn2_image(u)) for u in urls]
 
 
 def fetch_dynamic_backgrounds() -> List[Media]:
@@ -193,12 +186,9 @@ def collect_media() -> List[Media]:
 def build_embed(url: str, label: str) -> dict:
     now = datetime.now(timezone.utc)
     embed: Dict[str, Any] = {
-        "title": label,
-        "url": url,
         "description": f"[{url}]({url})",
         "color": EMBED_COLOR,
-        "image": {"url": url},
-        "footer": {"text": FOOTER_TEXT},
+        "thumbnail": {"url": url},
         "timestamp": now.isoformat(),
     }
     return {"embeds": [embed]}
@@ -220,8 +210,8 @@ def send_discord(payload: dict) -> None:
     try:
         resp = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=15)
         if resp.status_code in (200, 204):
-            title = payload.get("embeds", [{}])[0].get("title", "")
-            print(f"[OK] Sent embed: {title}")
+            thumbnail = payload.get("embeds", [{}])[0].get("thumbnail", {}).get("url", "")
+            print(f"[OK] Sent embed: {thumbnail}")
         else:
             print(f"[ERROR] Discord returned {resp.status_code}: {resp.text[:200]}")
     except Exception as e:

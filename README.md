@@ -51,13 +51,12 @@ This repository contains three focused GitHub Actions bots that post to Discord:
 ### Image/Video URL Notifier
 - Checks **every 15 minutes**
 - Tracks the storefront artwork Epic swaps in when a new Fortnite version ships:
-  - **EGS Store Content API** → `cdn2.unrealengine.com/fnbr-*` launcher blades (16:9, 3:4) and PS PDP cover art
+  - **EGS Store Content API** → all `cdn2.unrealengine.com` artwork & screenshots (age rating logos and V-Bucks banners excluded)
   - **Fortnite content API** → `dynamicbackgrounds` lobby/vault key art
   - **Microsoft Store** → product page artwork
 - Posts clean embeds with:
-  - A title naming the source (e.g. `EGS Launcher Blade (16:9)`)
   - The full URL as a clickable link
-  - The image displayed large
+  - The image as a thumbnail (small preview on the right)
 - Dedicated webhook (separate channel recommended)
 - Tracks already-seen URLs in `data/notified_image_urls.json`
 - Built-in **test mode**: manually trigger to send the latest detected image/video URL for verification (forces real send when `dry_run` is unchecked)
