@@ -1,88 +1,93 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Fortnite Image/Video URL Notifier
-Detects new image and video URLs from Fortnite-only endpoints and posts them
-via a dedicated Discord webhook.
+Fortnite Image URL Notifier
 
-Sources used (all Fortnite-scoped only):
-  - fortnitecontent-website-prod07.ol.epicgames.com/content/api/pages/fortnite-game
-      -> dynamicbackgrounds  (lobby/vault keyarts — still active)
-      -> battleroyalnews     (BR news images — extracted from full page response)
-      -> savetheworld        (STW news images — extracted from full page response)
-      -> creative            (Creative news images — extracted from full page response)
+Tracks the storefront artwork Epic swaps in when a new Fortnite version ships,
+and posts every newly seen image to a dedicated Discord webhook.
 
-The old /fortnite-game/<subkey> routes (battleroyal-news, save-the-world-news,
-creative-news) return 404. The correct approach per the official docs is to
-fetch /content/api/pages/fortnite-game once and navigate into the JSON keys.
+Sources:
+  1. EGS Platform Service product endpoint -> EGS launcher blades + logo
+  2. Fortnite content API / dynamicbackgrounds -> lobby & vault key art
+  3. Microsoft Store product page -> store-images.s-microsoft.com artwork
+  4. PlayStation Store product pages -> PDP cover art
 
-Ref: https://github.com/LeleDerGrasshalmi/FortniteEndpointsDocumentation
+Refs:
+  https://github.com/LeleDerGrasshalmi/FortniteEndpointsDocumentation
 """
 
 import os
+import re
 import json
 import requests
 from datetime import datetime, timezone
-from typing import Set, Dict, Any, List
+from typing import Set, Dict, Any, List, Tuple
 
 # ==================== CONFIG ====================
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_IMAGE_URL_WEBHOOK_URL", "").strip()
 DRY_RUN = os.environ.get("DRY_RUN", "0") == "1" or not DISCORD_WEBHOOK_URL
 TEST_LAST_MEDIA = os.environ.get("TEST_LAST_MEDIA", "0") == "1"
 
-STATE_FILE = "data/notified_image_urls.json"
+STATE_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data",
+    "notified_image_urls.json",
+)
 
-# ── Official Epic CMS — single call, all sections extracted from JSON ────────
-# Fetching /fortnite-game once is more efficient and avoids the 404 sub-key issue.
-# Keys below are the top-level JSON properties present in the response.
-FN_CONTENT_BASE_URL = (
+EMBED_COLOR = 0x6B21A8
+FOOTER_TEXT = "MakaStats"
+HTTP_TIMEOUT = 30
+
+# Epic and the console stores both reject requests without a browser User-Agent.
+BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+EGS_PRODUCT_URL = (
+    "https://egs-platform-service.store.epicgames.com"
+    "/api/v1/egs/products/prod-fn?country=US&locale=en&store=EGS"
+)
+
+DYNAMIC_BACKGROUNDS_URL = (
     "https://fortnitecontent-website-prod07.ol.epicgames.com"
-    "/content/api/pages/fortnite-game"
+    "/content/api/pages/fortnite-game/dynamicbackgrounds?lang=en"
 )
 
-# Sub-sections we want to extract from the full fortnite-game response.
-# Each tuple is (label_for_logs, dot-separated path inside the JSON).
-# e.g. "battleroyalnews.news.messages" means data["battleroyalnews"]["news"]["messages"]
-FN_CONTENT_SECTIONS = [
-    ("dynamicbackgrounds", "dynamicbackgrounds"),
-    ("battleroyalnews",    "battleroyalnews"),
-    ("savetheworld",       "savetheworld"),
-    ("creative",           "creative"),
-]
+MS_STORE_URL = "https://www.microsoft.com/en-us/p/fortnite/9nblggh537bp"
 
-# Supported media extensions
-IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
-VIDEO_EXTS = (".mp4", ".webm", ".mov", ".mpd", ".m3u8")
+PS_STORE_URLS = (
+    "https://store.playstation.com/en-us/product/UP2005-CUSA07677_00-FORTNITEPS5FULL0",
+    "https://store.playstation.com/en-us/product/UP2005-CUSA07022_00-FORTNITEPS4FULL0",
+)
 
-# ── CDN allow-list: domains that serve Fortnite media ─────────────────────────
-FORTNITE_CDN_DOMAINS = (
+# Human-readable labels for the EGS media slots.
+EGS_MEDIA_LABELS = {
+    "card16x9": "EGS Launcher Blade (16:9)",
+    "card3x4": "EGS Launcher Blade (3:4)",
+    "logo": "EGS Launcher Logo",
+}
+
+# Only these hosts may produce a notification.
+ALLOWED_IMAGE_DOMAINS = (
     "cdn2.unrealengine.com",
-    "media.fortniteapi.io",
-    "fortnitecontent-website-prod07.ol.epicgames.com",
-    "epic-games-store-cdn.qstv.on.epicgames.com",
+    "cdn1.epicgames.com",
+    "store-images.s-microsoft.com",
+    "image.api.np.ac.playstation.net",
+    "image.api.playstation.com",
 )
 
-# ── URL slug patterns that confirm Fortnite origin ───────────────────────────
-FORTNITE_URL_PATTERNS = (
-    "fortnite",
-    "fnbr-",
-    "brfnbr-",
-    "fn-og-",
-    "fn-og/",
-    "/fn-",
-    "fn-c",
-    "gameplayscreenshot",
-    "egs-launcher-blade",
-    "keyart",
-    "discovertile",
-    "festivalpass",
-    "rocketracing",
-    "lego-fortnite",
-    "legofortnite",
-    "savetheworldnews",
-    "battleroyal",
-    "creativenews",
+MS_IMAGE_RE = re.compile(r"https://store-images\.s-microsoft\.com/image/apps\.[A-Za-z0-9._\-]+")
+PS_IMAGE_RE = re.compile(
+    r"https://(?:image\.api\.np\.ac\.playstation\.net|image\.api\.playstation\.com"
+    r"|cdn2\.unrealengine\.com)/[A-Za-z0-9._\-/]+"
 )
+
+# A URL plus the label describing where it came from.
+Media = Tuple[str, str]
 
 
 def load_notified() -> Set[str]:
@@ -91,121 +96,142 @@ def load_notified() -> Set[str]:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return set(data) if isinstance(data, list) else set()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[STATE] Could not read {STATE_FILE}: {e}")
     return set()
+
 
 def save_notified(urls: Set[str]) -> None:
     os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
     with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(sorted(list(urls)), f, indent=2)
-
-def extract_media_urls(data: Any) -> List[str]:
-    """Recursively find all HTTP URLs that look like images or videos."""
-    urls: List[str] = []
-    seen: Set[str] = set()
-
-    def recurse(obj: Any):
-        if isinstance(obj, dict):
-            for value in obj.values():
-                recurse(value)
-        elif isinstance(obj, list):
-            for item in obj:
-                recurse(item)
-        elif isinstance(obj, str):
-            if obj.startswith("http"):
-                lower = obj.lower()
-                if any(lower.endswith(ext) for ext in IMAGE_EXTS + VIDEO_EXTS):
-                    if obj not in seen:
-                        seen.add(obj)
-                        urls.append(obj)
-
-    recurse(data)
-    return urls
+        json.dump(sorted(urls), f, indent=2)
 
 
-def is_fortnite_media(url: str) -> bool:
-    """
-    Two-pass filter:
-      1. Domain allow-list  -> CDN must be a known Fortnite CDN.
-      2. Path slug check    -> URL path must contain at least one Fortnite pattern.
-    """
-    u = url.lower()
-
-    if not any(domain in u for domain in FORTNITE_CDN_DOMAINS):
-        return False
-
-    # Fortnite-exclusive domains: no additional slug check needed
-    fortnite_exclusive_domains = (
-        "fortnitecontent-website-prod07.ol.epicgames.com",
-        "epic-games-store-cdn.qstv.on.epicgames.com",
-        "media.fortniteapi.io",
-    )
-    if any(domain in u for domain in fortnite_exclusive_domains):
-        return True
-
-    # Shared CDNs (cdn2.unrealengine.com): require a Fortnite path slug
-    return any(pattern in u for pattern in FORTNITE_URL_PATTERNS)
+def is_allowed_image(url: str) -> bool:
+    return any(domain in url.lower() for domain in ALLOWED_IMAGE_DOMAINS)
 
 
-def fetch_fortnite_content() -> Dict[str, Any]:
-    """
-    Fetch the full /content/api/pages/fortnite-game response once and extract
-    the relevant sub-sections (dynamicbackgrounds, battleroyalnews, savetheworld,
-    creative).  This replaces the old per-subkey calls that return 404.
-    """
-    result: Dict[str, Any] = {}
+def strip_query(url: str) -> str:
+    return url.split("?", 1)[0]
+
+
+def fetch_egs_product_images() -> List[Media]:
+    """EGS launcher blades and logo — these swap on every new Fortnite version."""
     try:
-        resp = requests.get(FN_CONTENT_BASE_URL, timeout=30)
+        resp = requests.get(EGS_PRODUCT_URL, headers=BROWSER_HEADERS, timeout=HTTP_TIMEOUT)
         resp.raise_for_status()
-        page_data = resp.json()
+        media = resp.json().get("media") or {}
     except Exception as e:
-        print(f"[API] Failed to fetch {FN_CONTENT_BASE_URL}: {e}")
-        return result
+        print(f"[EGS] Failed to fetch product media: {e}")
+        return []
 
-    for label, key in FN_CONTENT_SECTIONS:
-        section = page_data.get(key)
-        if section is not None:
-            result[label] = section
-            print(f"[API] Fetched section: {label}")
-        else:
-            print(f"[API] Section '{label}' not found in fortnite-game response")
+    results: List[Media] = []
+    for slot, label in EGS_MEDIA_LABELS.items():
+        entry = media.get(slot)
+        src = entry.get("imageSrc") if isinstance(entry, dict) else None
+        if src:
+            results.append((strip_query(src), label))
 
-    return result
-
-
-def is_video(url: str) -> bool:
-    """Return True if the URL points to a video file."""
-    return any(url.lower().endswith(ext) for ext in VIDEO_EXTS)
+    print(f"[EGS] {len(results)} image(s)")
+    return results
 
 
-def build_embed(url: str) -> dict:
+def fetch_dynamic_backgrounds() -> List[Media]:
+    """Lobby / vault key art from the Fortnite content API."""
+    try:
+        resp = requests.get(
+            DYNAMIC_BACKGROUNDS_URL, headers=BROWSER_HEADERS, timeout=HTTP_TIMEOUT
+        )
+        resp.raise_for_status()
+        backgrounds = (resp.json().get("backgrounds") or {}).get("backgrounds") or []
+    except Exception as e:
+        print(f"[BACKGROUNDS] Failed to fetch dynamic backgrounds: {e}")
+        return []
+
+    results: List[Media] = []
+    for background in backgrounds:
+        if not isinstance(background, dict):
+            continue
+        image = background.get("backgroundimage")
+        if not image:
+            continue
+        key = (background.get("key") or "dynamic").capitalize()
+        results.append((strip_query(image), f"{key} Background"))
+
+    print(f"[BACKGROUNDS] {len(results)} image(s)")
+    return results
+
+
+def fetch_ms_store_images() -> List[Media]:
+    """Microsoft Store artwork, scraped from the product page HTML."""
+    try:
+        resp = requests.get(MS_STORE_URL, headers=BROWSER_HEADERS, timeout=HTTP_TIMEOUT)
+        resp.raise_for_status()
+        html = resp.text
+    except Exception as e:
+        print(f"[MS-STORE] Failed to fetch product page: {e}")
+        return []
+
+    # Sizing hints (?h=253) vary per viewport, so key off the base URL only.
+    urls = sorted({strip_query(u) for u in MS_IMAGE_RE.findall(html)})
+    print(f"[MS-STORE] {len(urls)} image(s)")
+    return [(u, "Microsoft Store") for u in urls]
+
+
+def fetch_ps_store_images() -> List[Media]:
     """
-    Build a Discord embed payload for the given media URL.
+    PlayStation Store PDP cover art.
 
-    Layout (mirrors the url-tracker screenshot):
-      - title   : the raw URL, clickable (links to the media)
-      - image   : thumbnail rendered inline (images only)
-      - color   : Fortnite blue accent
-      - footer  : detection date/time
+    The store renders client-side and serves a content-free shell to non-browser
+    clients, so this often finds nothing; that is expected, not an error.
     """
-    now_iso = datetime.now(timezone.utc).isoformat()
-    now_display = datetime.now().strftime("%d/%m/%Y %H:%M")
+    found: Set[str] = set()
+    for page_url in PS_STORE_URLS:
+        try:
+            resp = requests.get(page_url, headers=BROWSER_HEADERS, timeout=HTTP_TIMEOUT)
+            resp.raise_for_status()
+        except Exception as e:
+            print(f"[PS-STORE] Failed to fetch {page_url}: {e}")
+            continue
+        found.update(strip_query(u) for u in PS_IMAGE_RE.findall(resp.text))
 
+    urls = sorted(u for u in found if len(u.rstrip("/").split("/")) > 3)
+    print(f"[PS-STORE] {len(urls)} image(s)")
+    return [(u, "PlayStation Store") for u in urls]
+
+
+def collect_media() -> List[Media]:
+    """Run every source and return deduplicated, allow-listed media."""
+    collected: List[Media] = []
+    for fetch in (
+        fetch_egs_product_images,
+        fetch_dynamic_backgrounds,
+        fetch_ms_store_images,
+        fetch_ps_store_images,
+    ):
+        collected.extend(fetch())
+
+    seen: Set[str] = set()
+    results: List[Media] = []
+    for url, label in collected:
+        if url in seen or not is_allowed_image(url):
+            continue
+        seen.add(url)
+        results.append((url, label))
+    return results
+
+
+def build_embed(url: str, label: str) -> dict:
+    now = datetime.now(timezone.utc)
     embed: Dict[str, Any] = {
-        "title": url,
+        "title": label,
         "url": url,
-        "color": 0x6B21A8,          # Fortnite purple accent
-        "footer": {
-            "text": now_display,
-        },
-        "timestamp": now_iso,
+        "description": f"[{url}]({url})",
+        "color": EMBED_COLOR,
+        "image": {"url": url},
+        "footer": {"text": FOOTER_TEXT},
+        "timestamp": now.isoformat(),
     }
-
-    # Attach image preview for image files; videos get a plain link embed
-    if not is_video(url):
-        embed["image"] = {"url": url}
-
     return {"embeds": [embed]}
 
 
@@ -226,69 +252,56 @@ def send_discord(payload: dict) -> None:
         resp = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=15)
         if resp.status_code in (200, 204):
             title = payload.get("embeds", [{}])[0].get("title", "")
-            print(f"[OK] Sent embed: {title[:80]}...")
+            print(f"[OK] Sent embed: {title}")
         else:
             print(f"[ERROR] Discord returned {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
         print(f"[ERROR] Failed to send to Discord: {e}")
 
+
 def main():
     global DRY_RUN
-    print(f"=== Fortnite Image/Video URL Notifier ===")
+    print("=== Fortnite Image URL Notifier ===")
     print(f"Time: {datetime.now(timezone.utc).isoformat()}")
 
     notified = load_notified()
+    current = collect_media()
 
-    content_data = fetch_fortnite_content()
-
-    if not content_data:
-        print("[ERROR] No data received from any source")
+    if not current:
+        print("[ERROR] No images received from any source")
         return
 
-    raw_urls = extract_media_urls(content_data)
-    current_urls = [u for u in raw_urls if is_fortnite_media(u)]
+    print(f"[INFO] {len(current)} image(s) currently published")
 
-    print(f"[INFO] {len(raw_urls)} raw URLs found -> {len(current_urls)} passed Fortnite filter")
-
-    # ===================== TEST MODE =====================
     if TEST_LAST_MEDIA:
-        print("[TEST] Mode activé : envoi de la dernière image/vidéo détectée")
-        if not current_urls:
-            print("[TEST] Aucune URL trouvée.")
-            return
-        latest_url = current_urls[-1]
-        print(f"[TEST] Dernière URL : {latest_url}")
-        payload = build_embed(latest_url)
-        original_dry = DRY_RUN
-        DRY_RUN = False
-        send_discord(payload)
+        url, label = current[-1]
+        print(f"[TEST] Sending last detected image: {url}")
+        original_dry, DRY_RUN = DRY_RUN, False
+        send_discord(build_embed(url, label))
         DRY_RUN = original_dry
-        print("[TEST] Terminé (le state 'notified' n'a pas été modifié).")
+        print("[TEST] Done (state untouched).")
         return
-    # =====================================================
 
-    new_urls = [u for u in current_urls if u not in notified]
+    current_urls = {url for url, _ in current}
 
     if not notified:
-        save_notified(set(current_urls))
-        print(f"[SEED] First run - seeded {len(current_urls)} existing URLs. No notifications sent.")
+        save_notified(current_urls)
+        print(f"[SEED] First run - seeded {len(current_urls)} URLs. No notifications sent.")
         return
 
-    save_notified(set(current_urls))
-
-    if not new_urls:
-        print("No new image/video URLs detected.")
+    new_media = [(url, label) for url, label in current if url not in notified]
+    if not new_media:
+        print("No new image URLs detected.")
+        save_notified(notified | current_urls)
         return
 
-    print(f"[INFO] Detected {len(new_urls)} new media URL(s)")
+    print(f"[INFO] Detected {len(new_media)} new image URL(s)")
+    for url, label in new_media:
+        send_discord(build_embed(url, label))
 
-    for url in new_urls:
-        payload = build_embed(url)
-        send_discord(payload)
-        notified.add(url)
-
-    save_notified(notified)
+    save_notified(notified | current_urls)
     print("Done.")
+
 
 if __name__ == "__main__":
     main()
