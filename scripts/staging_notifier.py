@@ -36,11 +36,12 @@ DRY_RUN = os.environ.get("DRY_RUN", "0") == "1" or not DISCORD_WEBHOOK_URL
 TEST_LAST = os.environ.get("TEST_LAST_STAGING", "0") == "1"
 
 # Optional: override Epic credentials via env (not needed for anonymous access)
+# Default: fortnitePCGameClient — public anonymous client, supports client_credentials
 EPIC_CLIENT_ID = os.environ.get(
-    "EPIC_CLIENT_ID", "xyza7891muomRmynIIHaJB9COBKgwj4R"
+    "EPIC_CLIENT_ID", "ec684b8c687f479fadea3cb2ad83f5c6"
 ).strip()
 EPIC_CLIENT_SECRET = os.environ.get(
-    "EPIC_CLIENT_SECRET", "Eh9K3uIh8MooKMkODRwTaLBIVnFJnEWuLwTaLBIVnFJnEWuL"
+    "EPIC_CLIENT_SECRET", "e1f31c211f28413186262d37a13fc84d"
 ).strip()
 
 STATE_FILE = os.path.join(
