@@ -184,9 +184,21 @@ def collect_media() -> List[Media]:
 
 
 def build_embed(url: str, label: str) -> dict:
+    """
+    Build a Discord embed with:
+    - a clickable title (the filename extracted from the URL)
+    - the URL set on the embed so clicking the title opens the image
+    - the image displayed as thumbnail
+    No duplicate raw URL in the description.
+    """
     now = datetime.now(timezone.utc)
+
+    # Extract a short, readable filename from the URL for the embed title
+    filename = url.rstrip("/").split("/")[-1]
+
     embed: Dict[str, Any] = {
-        "description": f"[{url}]({url})",
+        "title": filename,
+        "url": url,           # makes the title a clickable hyperlink in Discord
         "color": EMBED_COLOR,
         "thumbnail": {"url": url},
         "timestamp": now.isoformat(),
