@@ -64,7 +64,7 @@ ALLOWED_IMAGE_DOMAINS = (
 )
 
 MS_IMAGE_RE = re.compile(r"https://store-images\.s-microsoft\.com/image/apps\.[A-Za-z0-9._\-]+")
-CDN2_IMAGE_RE = re.compile(r"https://cdn2\.unrealengine\.com/[^\"'\&<>\\\\)]+")
+CDN2_IMAGE_RE = re.compile(r"https://cdn2\.unrealengine\.com/[^\"'\&<>\\\\\)]+")
 
 # A URL plus the label describing where it came from.
 Media = Tuple[str, str]
@@ -189,6 +189,7 @@ def build_embed(url: str, label: str) -> dict:
     - a clickable title (the filename extracted from the URL)
     - the URL set on the embed so clicking the title opens the image
     - the image displayed as thumbnail
+    - the source label as a subtle footer (small grey text)
     No duplicate raw URL in the description.
     """
     now = datetime.now(timezone.utc)
@@ -201,6 +202,7 @@ def build_embed(url: str, label: str) -> dict:
         "url": url,           # makes the title a clickable hyperlink in Discord
         "color": EMBED_COLOR,
         "thumbnail": {"url": url},
+        "footer": {"text": label},
         "timestamp": now.isoformat(),
     }
     return {"embeds": [embed]}
