@@ -3,11 +3,13 @@
 """
 Fortnite Staging Server Notifier
 
-Scrapes the NiteStats staging page and posts a Discord embed whenever
-a staging server changes its build.
+Fetches staging server data from NiteStats JSON API endpoints and posts
+a Discord embed whenever a staging server changes its build.
 
-Data source: https://nitestats.com/staging  (HTML scraping via BeautifulSoup)
-The old /api/v1/staging endpoint no longer exists.
+Data sources (tried in order):
+  1. https://nitestats.com/v1/epic/staging          (primary JSON API)
+  2. https://nitestats.com/api/v1/staging           (legacy alias)
+  3. https://fortniteapi.io/v1/status?lang=en       (fallback, staging field)
 
 Embed colour code:
   Blue  (0x3498DB) - normal build update (same version)
@@ -21,15 +23,11 @@ import requests
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-try:
-    from bs4 import BeautifulSoup
-except ImportError:
-    BeautifulSoup = None  # type: ignore
-
 # ==================== CONFIG ====================
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_STAGING_WEBHOOK_URL", "").strip()
 DRY_RUN = os.environ.get("DRY_RUN", "0") == "1" or not DISCORD_WEBHOOK_URL
 TEST_LAST = os.environ.get("TEST_LAST_STAGING", "0") == "1"
+FORTNITE_API_KEY = os.environ.get("FORTNITE_API_KEY", "").strip()
 
 STATE_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -37,8 +35,12 @@ STATE_FILE = os.path.join(
     "staging_state.json",
 )
 
-# NiteStats staging page — data is embedded in a Next.js __NEXT_DATA__ JSON blob
-NITESTATS_PAGE_URL = "https://nitestats.com/staging"
+# API endpoints tried in order
+NITESTATS_API_URLS = [
+    "https://nitestats.com/v1/epic/staging",
+    "https://nitestats.com/api/v1/staging",
+]
+FORTNITEAPI_IO_STATUS = "https://fortniteapi.io/v1/status"
 
 HTTP_TIMEOUT = 30
 BROWSER_HEADERS = {
@@ -46,7 +48,7 @@ BROWSER_HEADERS = {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept": "application/json, text/html, */*;q=0.8",
     "Accept-Language": "en-US,en;q=0.5",
 }
 
@@ -74,101 +76,85 @@ def save_state(state: Dict[str, Any]) -> None:
         json.dump(state, f, indent=2)
 
 
-# ==================== SCRAPING ====================
+# ==================== FETCHING ====================
 
-def _extract_next_data(html: str) -> Optional[dict]:
-    """
-    Extract the JSON payload from <script id="__NEXT_DATA__"> in a Next.js page.
-    Returns the parsed dict, or None if not found.
-    """
-    # Try BeautifulSoup first (more robust)
-    if BeautifulSoup is not None:
-        soup = BeautifulSoup(html, "html.parser")
-        tag = soup.find("script", {"id": "__NEXT_DATA__"})
-        if tag and tag.string:
-            try:
-                return json.loads(tag.string)
-            except json.JSONDecodeError as e:
-                print(f"[PARSE] JSON decode error in __NEXT_DATA__: {e}")
-                return None
-
-    # Fallback: regex
-    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)</script>', html)
-    if m:
+def _try_nitestats_api() -> Optional[List[Dict[str, Any]]]:
+    """Try NiteStats JSON API endpoints directly."""
+    for url in NITESTATS_API_URLS:
         try:
-            return json.loads(m.group(1))
-        except json.JSONDecodeError as e:
-            print(f"[PARSE] JSON decode error (regex fallback): {e}")
+            resp = requests.get(url, headers=BROWSER_HEADERS, timeout=HTTP_TIMEOUT)
+            if resp.status_code == 403:
+                print(f"[API] {url} → 403 Forbidden, trying next...")
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            # Response may be a list or a dict with a servers/staging key
+            if isinstance(data, list):
+                print(f"[API] Fetched {len(data)} server(s) from {url}")
+                return data
+            if isinstance(data, dict):
+                for key in ("staging", "servers", "stagingServers", "data"):
+                    val = data.get(key)
+                    if isinstance(val, list) and len(val) > 0:
+                        print(f"[API] Fetched {len(val)} server(s) from {url} (key: {key})")
+                        return val
+                # Single-server dict?
+                server_keys = {"name", "serverName", "cln", "CLN", "build", "buildId", "version"}
+                if server_keys & data.keys():
+                    print(f"[API] Fetched 1 server from {url}")
+                    return [data]
+                print(f"[API] {url} → unexpected JSON shape, keys: {list(data.keys())}")
+        except requests.exceptions.JSONDecodeError:
+            print(f"[API] {url} → response is not JSON")
+        except Exception as e:
+            print(f"[API] {url} → {e}")
     return None
 
 
-def _parse_servers(next_data: dict) -> List[Dict[str, Any]]:
+def _try_fortniteapi_io() -> Optional[List[Dict[str, Any]]]:
     """
-    Walk the Next.js page props tree to find the staging server list.
-    NiteStats typically nests it under:
-      props.pageProps.stagingServers   OR
-      props.pageProps.servers          OR
-      props.pageProps.data.servers     etc.
-    We search recursively for the first list that looks like server objects.
+    Fallback: fortniteapi.io /v1/status — may contain a staging section.
+    Requires FORTNITE_API_KEY env var if the endpoint is auth-gated.
     """
-    def looks_like_server_list(obj):
-        if not isinstance(obj, list) or len(obj) == 0:
-            return False
-        first = obj[0]
-        if not isinstance(first, dict):
-            return False
-        # Must have at least one of the expected server keys
-        server_keys = {"name", "serverName", "cln", "CLN", "build", "buildId", "version", "branch"}
-        return bool(server_keys & first.keys())
-
-    def search(node, depth=0):
-        if depth > 10:
-            return None
-        if looks_like_server_list(node):
-            return node
-        if isinstance(node, dict):
-            for v in node.values():
-                result = search(v, depth + 1)
-                if result is not None:
-                    return result
-        if isinstance(node, list):
-            for item in node:
-                result = search(item, depth + 1)
-                if result is not None:
-                    return result
-        return None
-
-    return search(next_data) or []
+    headers = {**BROWSER_HEADERS}
+    if FORTNITE_API_KEY:
+        headers["Authorization"] = FORTNITE_API_KEY
+    try:
+        resp = requests.get(
+            FORTNITEAPI_IO_STATUS,
+            headers=headers,
+            params={"lang": "en"},
+            timeout=HTTP_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        for key in ("staging", "stagingServers", "servers"):
+            val = data.get(key)
+            if isinstance(val, list) and len(val) > 0:
+                print(f"[API] Fetched {len(val)} server(s) from fortniteapi.io (key: {key})")
+                return val
+        print(f"[API] fortniteapi.io → no staging data found. Keys: {list(data.keys())}")
+    except Exception as e:
+        print(f"[API] fortniteapi.io → {e}")
+    return None
 
 
 def fetch_staging() -> Optional[List[Dict[str, Any]]]:
     """
-    Fetch the NiteStats staging page and extract server data from __NEXT_DATA__.
-    Returns a list of raw server dicts, or None on failure.
+    Try all known data sources in order.
+    Returns a list of raw server dicts, or None on total failure.
     """
-    try:
-        resp = requests.get(NITESTATS_PAGE_URL, headers=BROWSER_HEADERS, timeout=HTTP_TIMEOUT)
-        resp.raise_for_status()
-    except Exception as e:
-        print(f"[API] Failed to fetch staging page: {e}")
-        return None
+    servers = _try_nitestats_api()
+    if servers is not None:
+        return servers
 
-    next_data = _extract_next_data(resp.text)
-    if next_data is None:
-        print("[API] Could not find __NEXT_DATA__ in the NiteStats staging page.")
-        print("[API] The page structure may have changed — manual inspection required.")
-        return None
+    print("[API] All NiteStats endpoints failed — trying fortniteapi.io fallback...")
+    servers = _try_fortniteapi_io()
+    if servers is not None:
+        return servers
 
-    servers = _parse_servers(next_data)
-    if not servers:
-        print("[API] __NEXT_DATA__ found but no server list detected inside it.")
-        print("[API] Keys available in pageProps:", list(
-            next_data.get("props", {}).get("pageProps", {}).keys()
-        ))
-        return None
-
-    print(f"[API] Fetched {len(servers)} server(s) from NiteStats staging page")
-    return servers
+    print("[API] All data sources exhausted.")
+    return None
 
 
 # ==================== EMBED ====================
@@ -263,7 +249,7 @@ def main():
     servers = fetch_staging()
     if servers is None:
         print("[ERROR] Could not fetch staging data \u2014 aborting.")
-        return
+        raise SystemExit(1)
 
     state = load_state()
 
