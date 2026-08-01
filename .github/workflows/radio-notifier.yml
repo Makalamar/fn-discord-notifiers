@@ -1,0 +1,65 @@
+name: Radio Station Notifier
+
+on:
+  schedule:
+    - cron: '0 * * * *'   # every hour
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'DRY_RUN (no Discord message sent)'
+        required: false
+        default: 'false'
+      test_mode:
+        description: 'TEST_MODE (send embed for first station, no state change)'
+        required: false
+        default: 'false'
+
+jobs:
+  notify:
+    name: Check Fortnite Radio Stations
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Restore cache
+        id: restore-cache
+        uses: actions/cache@v4
+        with:
+          path: data/radio_stations_cache.json
+          key: radio-stations-cache-${{ runner.os }}
+          restore-keys: radio-stations-cache-
+
+      - name: Run notifier
+        env:
+          DISCORD_RADIO_WEBHOOK_URL: ${{ secrets.DISCORD_RADIO_WEBHOOK_URL }}
+          DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '0' }}
+          TEST_MODE: ${{ github.event.inputs.test_mode == 'true' && '1' || '0' }}
+        run: python scripts/radio_notifier.py
+
+      - name: Save cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/radio_stations_cache.json
+          key: radio-stations-cache-${{ runner.os }}-${{ github.run_id }}
+
+      - name: Commit updated cache
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/radio_stations_cache.json || true
+          git diff --cached --quiet || git commit -m "chore: update radio stations cache [skip ci]"
+          git push || true
