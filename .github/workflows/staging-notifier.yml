@@ -1,0 +1,70 @@
+name: Fortnite Staging Server Notifier
+
+on:
+  schedule:
+    # Check every 15 minutes
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "DRY_RUN (affiche l'embed sans poster sur Discord)"
+        required: false
+        default: false
+        type: boolean
+      test_last_staging:
+        description: "TEST: envoie un embed de test pour le dernier serveur détecté. Ne modifie pas le state."
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Run Staging Notifier
+        env:
+          DISCORD_STAGING_WEBHOOK_URL: ${{ secrets.DISCORD_STAGING_WEBHOOK_URL }}
+          DRY_RUN: ${{ github.event.inputs.dry_run && '1' || '0' }}
+          TEST_LAST_STAGING: ${{ github.event.inputs.test_last_staging && '1' || '0' }}
+        run: python scripts/staging_notifier.py
+
+      - name: Commit staging state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
+          mkdir -p data
+          if [ ! -f data/staging_state.json ]; then
+            echo "{}" > data/staging_state.json
+          fi
+
+          git add -f data/staging_state.json
+
+          if git diff --cached --quiet; then
+            echo "No staging state changes to record."
+          else
+            git commit -m "chore: update staging state [skip ci]"
+            git push
+            echo "Staging state committed."
+          fi
