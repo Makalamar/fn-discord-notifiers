@@ -34,7 +34,7 @@ STATE_FILE = os.path.join(
 )
 
 # NiteStats public API — returns an array of staging server objects
-NITESTATS_URL = "https://nitestats.com/api/v1/staging"
+NITESTATS_URL = "https://api.nitestats.com/v1/staging"
 
 HTTP_TIMEOUT = 30
 BROWSER_HEADERS = {
@@ -43,6 +43,8 @@ BROWSER_HEADERS = {
         "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     ),
     "Accept": "application/json",
+    "Referer": "https://nitestats.com/",
+    "Origin": "https://nitestats.com",
 }
 
 COLOR_NORMAL = 0x3498DB   # blue
