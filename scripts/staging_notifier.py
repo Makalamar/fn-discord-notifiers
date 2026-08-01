@@ -3,22 +3,29 @@
 """
 Fortnite Staging Server Notifier
 
-Fetches staging server data from NiteStats JSON API endpoints and posts
-a Discord embed whenever a staging server changes its build.
+Uses the official Epic Games Lightswitch Service to monitor staging servers.
+No third-party scraping required — this is a public API (auth required, no
+special permissions needed).
 
-Data sources (tried in order):
-  1. https://nitestats.com/v1/epic/staging          (primary JSON API)
-  2. https://nitestats.com/api/v1/staging           (legacy alias)
-  3. https://fortniteapi.io/v1/status?lang=en       (fallback, staging field)
+Endpoint:
+  GET https://lightswitch-public-service-prod06.ol.epicgames.com
+       /lightswitch/api/service/bulk/status
+       ?serviceId=FortnitePublicTest&serviceId=FortnitePreview&...
+
+Auth: Epic OAuth2 client_credentials (anonymous game client)
+  clientId  : xyza7891muomRmynIIHaJB9COBKgwj4R
+  secret    : listen to the sound of music
+  grantType : client_credentials
 
 Embed colour code:
-  Blue  (0x3498DB) - normal build update (same version)
-  Red   (0xE74C3C) - version change
+  Blue  (0x3498DB) - status/message change on same service
+  Red   (0xE74C3C) - service goes UP -> DOWN or DOWN -> UP
+  Green (0x2ECC71) - service comes back UP
 """
 
 import os
-import re
 import json
+import base64
 import requests
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -27,7 +34,14 @@ from typing import Any, Dict, List, Optional
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_STAGING_WEBHOOK_URL", "").strip()
 DRY_RUN = os.environ.get("DRY_RUN", "0") == "1" or not DISCORD_WEBHOOK_URL
 TEST_LAST = os.environ.get("TEST_LAST_STAGING", "0") == "1"
-FORTNITE_API_KEY = os.environ.get("FORTNITE_API_KEY", "").strip()
+
+# Optional: override Epic credentials via env (not needed for anonymous access)
+EPIC_CLIENT_ID = os.environ.get(
+    "EPIC_CLIENT_ID", "xyza7891muomRmynIIHaJB9COBKgwj4R"
+).strip()
+EPIC_CLIENT_SECRET = os.environ.get(
+    "EPIC_CLIENT_SECRET", "Eh9K3uIh8MooKMkODRwTaLBIVnFJnEWuLwTaLBIVnFJnEWuL"
+).strip()
 
 STATE_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -35,25 +49,38 @@ STATE_FILE = os.path.join(
     "staging_state.json",
 )
 
-# API endpoints tried in order
-NITESTATS_API_URLS = [
-    "https://nitestats.com/v1/epic/staging",
-    "https://nitestats.com/api/v1/staging",
+# Epic Lightswitch bulk status endpoint
+LIGHTSWITCH_URL = (
+    "https://lightswitch-public-service-prod06.ol.epicgames.com"
+    "/lightswitch/api/service/bulk/status"
+)
+EPIC_TOKEN_URL = (
+    "https://account-public-service-prod.ol.epicgames.com"
+    "/account/api/oauth/token"
+)
+
+# Staging service IDs to monitor (from Epic's Lightswitch documentation)
+STAGING_SERVICE_IDS: List[str] = [
+    "FortnitePublicTest",
+    "FortnitePreview",
+    "FortniteLoadTest",
+    "FortniteLiveBroadcasting",
+    "FortniteLiveTesting",
+    "FortnitePredeployA",
+    "FortnitePredeployB",
+    "FortniteReleasePlaytest",
+    "FortnitePartners",
+    "FortnitePartnersStable",
+    "FortniteLocTesting",
+    "FortniteExtQAReleaseTesting",
+    "FortniteExtQAReleaseTestingB",
 ]
-FORTNITEAPI_IO_STATUS = "https://fortniteapi.io/v1/status"
 
 HTTP_TIMEOUT = 30
-BROWSER_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "application/json, text/html, */*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-}
 
-COLOR_NORMAL = 0x3498DB
-COLOR_VERSION_CHANGE = 0xE74C3C
+COLOR_CHANGE = 0x3498DB    # blue — message/details changed
+COLOR_DOWN   = 0xE74C3C    # red  — went DOWN
+COLOR_UP     = 0x2ECC71    # green — came back UP
 
 
 # ==================== STATE ====================
@@ -76,131 +103,124 @@ def save_state(state: Dict[str, Any]) -> None:
         json.dump(state, f, indent=2)
 
 
-# ==================== FETCHING ====================
+# ==================== AUTH ====================
 
-def _try_nitestats_api() -> Optional[List[Dict[str, Any]]]:
-    """Try NiteStats JSON API endpoints directly."""
-    for url in NITESTATS_API_URLS:
-        try:
-            resp = requests.get(url, headers=BROWSER_HEADERS, timeout=HTTP_TIMEOUT)
-            if resp.status_code == 403:
-                print(f"[API] {url} → 403 Forbidden, trying next...")
-                continue
-            resp.raise_for_status()
-            data = resp.json()
-            # Response may be a list or a dict with a servers/staging key
-            if isinstance(data, list):
-                print(f"[API] Fetched {len(data)} server(s) from {url}")
-                return data
-            if isinstance(data, dict):
-                for key in ("staging", "servers", "stagingServers", "data"):
-                    val = data.get(key)
-                    if isinstance(val, list) and len(val) > 0:
-                        print(f"[API] Fetched {len(val)} server(s) from {url} (key: {key})")
-                        return val
-                # Single-server dict?
-                server_keys = {"name", "serverName", "cln", "CLN", "build", "buildId", "version"}
-                if server_keys & data.keys():
-                    print(f"[API] Fetched 1 server from {url}")
-                    return [data]
-                print(f"[API] {url} → unexpected JSON shape, keys: {list(data.keys())}")
-        except requests.exceptions.JSONDecodeError:
-            print(f"[API] {url} → response is not JSON")
-        except Exception as e:
-            print(f"[API] {url} → {e}")
+def get_epic_token() -> Optional[str]:
+    """
+    Obtain an anonymous Epic OAuth2 access token via client_credentials.
+    No user account is needed — this works with any registered game client.
+    """
+    credentials = base64.b64encode(
+        f"{EPIC_CLIENT_ID}:{EPIC_CLIENT_SECRET}".encode()
+    ).decode()
+    try:
+        resp = requests.post(
+            EPIC_TOKEN_URL,
+            headers={
+                "Authorization": f"Basic {credentials}",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            data={"grant_type": "client_credentials"},
+            timeout=HTTP_TIMEOUT,
+        )
+        resp.raise_for_status()
+        token = resp.json().get("access_token")
+        if token:
+            print("[AUTH] Epic OAuth2 token obtained")
+            return token
+        print(f"[AUTH] Token response missing access_token: {resp.text[:200]}")
+    except Exception as e:
+        print(f"[AUTH] Failed to get Epic token: {e}")
     return None
 
 
-def _try_fortniteapi_io() -> Optional[List[Dict[str, Any]]]:
+# ==================== FETCHING ====================
+
+def fetch_staging(token: str) -> Optional[List[Dict[str, Any]]]:
     """
-    Fallback: fortniteapi.io /v1/status — may contain a staging section.
-    Requires FORTNITE_API_KEY env var if the endpoint is auth-gated.
+    Query the Lightswitch bulk status endpoint for all staging service IDs.
+    Returns a list of service status dicts, or None on failure.
     """
-    headers = {**BROWSER_HEADERS}
-    if FORTNITE_API_KEY:
-        headers["Authorization"] = FORTNITE_API_KEY
+    params = [("serviceId", sid) for sid in STAGING_SERVICE_IDS]
     try:
         resp = requests.get(
-            FORTNITEAPI_IO_STATUS,
-            headers=headers,
-            params={"lang": "en"},
+            LIGHTSWITCH_URL,
+            headers={"Authorization": f"Bearer {token}"},
+            params=params,
             timeout=HTTP_TIMEOUT,
         )
         resp.raise_for_status()
         data = resp.json()
-        for key in ("staging", "stagingServers", "servers"):
-            val = data.get(key)
-            if isinstance(val, list) and len(val) > 0:
-                print(f"[API] Fetched {len(val)} server(s) from fortniteapi.io (key: {key})")
-                return val
-        print(f"[API] fortniteapi.io → no staging data found. Keys: {list(data.keys())}")
+        if not isinstance(data, list):
+            print(f"[API] Unexpected response shape: {type(data)}")
+            return None
+        # Filter to only the staging IDs we care about
+        results = [
+            s for s in data
+            if s.get("serviceInstanceId", "").lower()
+            in {sid.lower() for sid in STAGING_SERVICE_IDS}
+        ]
+        print(f"[API] Lightswitch: {len(results)} staging service(s) returned")
+        return results
     except Exception as e:
-        print(f"[API] fortniteapi.io → {e}")
-    return None
+        print(f"[API] Lightswitch request failed: {e}")
+        return None
 
 
-def fetch_staging() -> Optional[List[Dict[str, Any]]]:
-    """
-    Try all known data sources in order.
-    Returns a list of raw server dicts, or None on total failure.
-    """
-    servers = _try_nitestats_api()
-    if servers is not None:
-        return servers
+# ==================== NORMALISE ====================
 
-    print("[API] All NiteStats endpoints failed — trying fortniteapi.io fallback...")
-    servers = _try_fortniteapi_io()
-    if servers is not None:
-        return servers
-
-    print("[API] All data sources exhausted.")
-    return None
+def normalise(raw: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "status":  raw.get("status") or "UNKNOWN",
+        "message": raw.get("message") or "",
+    }
 
 
 # ==================== EMBED ====================
 
-def _s(text: Any) -> str:
-    return str(text).strip() if text not in (None, "") else "-"
+def build_embed(service_id: str, old: Dict[str, Any], new: Dict[str, Any]) -> dict:
+    old_status  = old["status"]
+    new_status  = new["status"]
+    old_message = old["message"]
+    new_message = new["message"]
 
+    status_changed = old_status != new_status
 
-def build_embed(server_name: str, old: Dict[str, Any], new: Dict[str, Any]) -> dict:
-    old_version = _s(old.get("version"))
-    new_version = _s(new.get("version"))
-    version_changed = old_version != new_version
-    color = COLOR_VERSION_CHANGE if version_changed else COLOR_NORMAL
+    if status_changed:
+        if new_status == "UP":
+            color = COLOR_UP
+        elif new_status == "DOWN":
+            color = COLOR_DOWN
+        else:
+            color = COLOR_CHANGE
+    else:
+        color = COLOR_CHANGE
 
-    old_cln    = _s(old.get("cln") or old.get("CLN"))
-    old_build  = _s(old.get("build") or old.get("buildId"))
-    old_module = _s(old.get("module"))
-    old_date   = _s(old.get("buildDate") or old.get("date"))
-    old_branch = _s(old.get("branch"))
-
-    new_cln    = _s(new.get("cln") or new.get("CLN"))
-    new_build  = _s(new.get("build") or new.get("buildId"))
-    new_module = _s(new.get("module"))
-    new_date   = _s(new.get("buildDate") or new.get("date"))
-    new_branch = _s(new.get("branch"))
+    status_icon = "\u2705" if new_status == "UP" else "\u274c" if new_status == "DOWN" else "\u26a0\ufe0f"
 
     desc_lines = [
-        f"**{server_name}**",
+        f"**{service_id}**",
         "",
-        "**CLN** \u00b7 **Build** \u00b7 **Module**",
-        f"~~{old_cln}~~ \u00b7 ~~{old_build}~~ \u00b7 ~~{old_module}~~",
-        f"{new_cln} \u00b7 {new_build} \u00b7 {new_module}",
-        "",
-        "**Build Date (UTC)** \u00b7 **Version** \u00b7 **Branch**",
-        f"~~{old_date}~~ \u00b7 ~~{old_version}~~ \u00b7 ~~{old_branch}~~",
-        f"{new_date} \u00b7 {new_version} \u00b7 {new_branch}",
+        f"**Status:** ~~{old_status}~~ \u2192 {status_icon} **{new_status}**",
     ]
+    if old_message != new_message:
+        desc_lines += [
+            "",
+            f"**Message:** ~~{old_message or '(none)'}~~",
+            f"\u2192 {new_message or '(none)'}",
+        ]
 
     embed: Dict[str, Any] = {
         "description": "\n".join(desc_lines),
         "color": color,
-        "footer": {"text": "nitestats.com/staging"},
+        "footer": {"text": "Epic Lightswitch Service"},
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
-    if version_changed:
-        embed["title"] = "\U0001f534 Version change detected"
+    if status_changed:
+        if new_status == "UP":
+            embed["title"] = "\U0001f7e2 Service back online"
+        elif new_status == "DOWN":
+            embed["title"] = "\U0001f534 Service went offline"
 
     return {"embeds": [embed]}
 
@@ -231,22 +251,16 @@ def send_discord(payload: dict) -> None:
 
 # ==================== MAIN ====================
 
-def normalise_server(raw: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "cln":       raw.get("cln") or raw.get("CLN") or "-",
-        "build":     raw.get("build") or raw.get("buildId") or "-",
-        "module":    raw.get("module") or raw.get("Module") or "-",
-        "buildDate": raw.get("buildDate") or raw.get("date") or "-",
-        "version":   raw.get("version") or "-",
-        "branch":    raw.get("branch") or "-",
-    }
-
-
 def main():
     print("=== Fortnite Staging Server Notifier ===")
     print(f"Time: {datetime.now(timezone.utc).isoformat()}")
 
-    servers = fetch_staging()
+    token = get_epic_token()
+    if not token:
+        print("[ERROR] Could not obtain Epic auth token \u2014 aborting.")
+        raise SystemExit(1)
+
+    servers = fetch_staging(token)
     if servers is None:
         print("[ERROR] Could not fetch staging data \u2014 aborting.")
         raise SystemExit(1)
@@ -258,16 +272,15 @@ def main():
             print("[TEST] No servers found.")
             return
         raw = servers[-1]
-        name = raw.get("name") or raw.get("serverName") or "UnknownServer"
-        current = normalise_server(raw)
+        sid = raw.get("serviceInstanceId", "UnknownService")
+        current = normalise(raw)
         fake_old = {
             **current,
-            "build": str(int(current["build"]) - 1)
-            if current["build"].isdigit()
-            else current["build"] + "-old",
+            "status": "DOWN" if current["status"] == "UP" else "UP",
+            "message": "Previous message (test)",
         }
-        print(f"[TEST] Sending test embed for: {name}")
-        payload = build_embed(name, fake_old, current)
+        print(f"[TEST] Sending test embed for: {sid}")
+        payload = build_embed(sid, fake_old, current)
         send_discord(payload)
         print("[TEST] Done (state untouched).")
         return
@@ -275,32 +288,32 @@ def main():
     if not state:
         new_state = {}
         for raw in servers:
-            name = raw.get("name") or raw.get("serverName") or "UnknownServer"
-            new_state[name] = normalise_server(raw)
+            sid = raw.get("serviceInstanceId", "UnknownService")
+            new_state[sid] = normalise(raw)
         save_state(new_state)
-        print(f"[SEED] First run \u2014 seeded {len(new_state)} server(s). No notifications sent.")
+        print(f"[SEED] First run \u2014 seeded {len(new_state)} service(s). No notifications sent.")
         return
 
     new_state = {**state}
     notified = 0
 
     for raw in servers:
-        name = raw.get("name") or raw.get("serverName") or "UnknownServer"
-        current = normalise_server(raw)
-        previous = state.get(name)
+        sid = raw.get("serviceInstanceId", "UnknownService")
+        current = normalise(raw)
+        previous = state.get(sid)
 
         if previous is None:
-            print(f"[NEW] Server appeared: {name} \u2014 seeding (no notification).")
-            new_state[name] = current
+            print(f"[NEW] Service appeared: {sid} \u2014 seeding (no notification).")
+            new_state[sid] = current
             continue
 
         if current == previous:
             continue
 
-        print(f"[CHANGE] {name}")
-        payload = build_embed(name, previous, current)
+        print(f"[CHANGE] {sid}: {previous['status']} \u2192 {current['status']}")
+        payload = build_embed(sid, previous, current)
         send_discord(payload)
-        new_state[name] = current
+        new_state[sid] = current
         notified += 1
 
     if notified == 0:
