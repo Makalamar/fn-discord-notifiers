@@ -185,23 +185,18 @@ def collect_media() -> List[Media]:
 
 def build_embed(url: str, label: str) -> dict:
     """
-    Build a Discord embed with:
-    - a clickable title (the filename extracted from the URL)
-    - the URL set on the embed so clicking the title opens the image
-    - the image displayed as thumbnail
-    - the source label as a subtle footer (small grey text)
-    No duplicate raw URL in the description.
+    Minimalist Discord embed:
+    - description: clickable link (no title)
+    - image: full-width display
+    - footer: source label (small grey text)
+    - timestamp
     """
     now = datetime.now(timezone.utc)
 
-    # Extract a short, readable filename from the URL for the embed title
-    filename = url.rstrip("/").split("/")[-1]
-
     embed: Dict[str, Any] = {
-        "title": filename,
-        "url": url,           # makes the title a clickable hyperlink in Discord
+        "description": url,
         "color": EMBED_COLOR,
-        "thumbnail": {"url": url},
+        "image": {"url": url},
         "footer": {"text": label},
         "timestamp": now.isoformat(),
     }
@@ -224,8 +219,8 @@ def send_discord(payload: dict) -> None:
     try:
         resp = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=15)
         if resp.status_code in (200, 204):
-            thumbnail = payload.get("embeds", [{}])[0].get("thumbnail", {}).get("url", "")
-            print(f"[OK] Sent embed: {thumbnail}")
+            image = payload.get("embeds", [{}])[0].get("image", {}).get("url", "")
+            print(f"[OK] Sent embed: {image}")
         else:
             print(f"[ERROR] Discord returned {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
