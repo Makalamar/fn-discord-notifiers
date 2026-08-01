@@ -1,1 +1,54 @@
-{}
+{
+  "fortnitepublictest": {
+    "status": "UP",
+    "message": "Fortnite is up"
+  },
+  "fortnitepreview": {
+    "status": "UP",
+    "message": "Fortnite is up"
+  },
+  "fortniteloadtest": {
+    "status": "UP",
+    "message": "This is a default status."
+  },
+  "fortnitelivebroadcasting": {
+    "status": "UP",
+    "message": "This is a default status."
+  },
+  "fortnitelivetesting": {
+    "status": "UP",
+    "message": "Fortnite is up"
+  },
+  "fortnitepredeploya": {
+    "status": "UP",
+    "message": "This is a default status."
+  },
+  "fortnitepredeployb": {
+    "status": "UP",
+    "message": "This is a default status."
+  },
+  "fortnitereleaseplaytest": {
+    "status": "UP",
+    "message": "This is a default status."
+  },
+  "fortnitepartners": {
+    "status": "UP",
+    "message": "This is a default status."
+  },
+  "fortnitepartnersstable": {
+    "status": "UP",
+    "message": "This is a default status."
+  },
+  "fortniteloctesting": {
+    "status": "UP",
+    "message": "This is a default status."
+  },
+  "fortniteextqareleasetesting": {
+    "status": "UP",
+    "message": "This is a default status."
+  },
+  "fortniteextqareleasetestingb": {
+    "status": "UP",
+    "message": "This is a default status."
+  }
+}
